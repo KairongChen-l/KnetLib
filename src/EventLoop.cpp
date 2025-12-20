@@ -5,7 +5,7 @@
 
 
 EventLoop::EventLoop():ep(nullptr),quit(false){
-    Epoll* ep = new Epoll();
+    ep = new Epoll();
 }
 
 EventLoop::~EventLoop(){
