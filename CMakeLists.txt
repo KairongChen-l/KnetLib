@@ -47,6 +47,16 @@ add_executable(ThreadPoolTest
     src/ThreadPool.cpp
 )
 
+# 创建压力测试可执行文件
+add_executable(test
+    test/test.cpp
+    src/utils.cpp
+    src/Buffer.cpp
+    src/InetAddress.cpp
+    src/Socket.cpp
+    src/ThreadPool.cpp
+)
+
 # 设置输出目录
 set_target_properties(server PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
@@ -57,6 +67,10 @@ set_target_properties(client PROPERTIES
 )
 
 set_target_properties(ThreadPoolTest PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
+set_target_properties(test PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 

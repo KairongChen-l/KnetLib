@@ -7,7 +7,7 @@
 
 //要区别EventLoop和对应的loop函数，这里是对象
 Channel::Channel(EventLoop* _loop,int _fd):loop(_loop),fd(_fd),
-                                events(0),revents(0),inEpoll(false){
+                                events(0),ready(0),inEpoll(false){
 
 }
 Channel::~Channel(){
@@ -18,7 +18,18 @@ Channel::~Channel(){
 }
 
 void Channel::handleEvent(){
-    callback();
+    if(ready & (EPOLLIN | EPOLLPRI)){
+        if(useThreadPool)       
+            loop->addThread(readCallback);
+        else
+            readCallback();
+    }
+    if(ready & (EPOLLOUT)){
+        if(useThreadPool)       
+            loop->addThread(writeCallback);
+        else
+            writeCallback();
+    }
 }
 
 void Channel::enableReading(){
@@ -31,8 +42,8 @@ int Channel::getFd(){
 uint32_t Channel::getEvents(){
     return events;
 }
-uint32_t Channel::getRevents(){
-    return revents;
+uint32_t Channel::getReady(){
+    return ready;
 }
 
 bool Channel::getInEpoll(){
@@ -43,10 +54,13 @@ void Channel::setInEpoll(){
     inEpoll = true;
 }
 
-void Channel::setRevents(uint32_t _ev){
-    revents = _ev;
+void Channel::setReady(uint32_t _ev){
+    ready = _ev;
 }
 
-void Channel::setCallback(std::function<void ()> _cb){
-    callback = _cb;
+void Channel::setReadCallback(std::function<void ()> _cb){
+    readCallback = _cb;
+}
+void Channel::setUseThreadPool(bool use){
+    useThreadPool = use;
 }
