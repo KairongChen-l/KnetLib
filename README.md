@@ -113,7 +113,11 @@ make
 
 # 5. 清理构建文件
 make clean-all
-# 或者
-cd ..
-rm -rf build
+
+# 6.测试
+make ThreadPoolTest
+# 运行测试（方式1）
+./bin/ThreadPoolTest
+# 运行测试（方式2，使用自定义目标）
+make run-test
 ```

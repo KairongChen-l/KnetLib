@@ -1,6 +1,7 @@
 #pragma once
-
+#include "Buffer.h"
 #include <functional>
+#include <string>
 
 class EventLoop;
 class Socket;
@@ -11,7 +12,8 @@ private:
     Socket *sock;
     Channel* chan;
     std::function<void(Socket*)> deleteConnectionCallBack;
-
+    std::string *inBuffer; //TODO：放在private域，目前用不了
+    Buffer *readBuffer;
 public:
     Connection(EventLoop* _loop,Socket* _sock);
     ~Connection();
