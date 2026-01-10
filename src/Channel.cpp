@@ -1,76 +1,134 @@
 #include "Channel.h"
 #include "EventLoop.h"
-#include <cstdint>
+#include <cassert>
 #include <sys/epoll.h>
-#include <sys/types.h>
-#include <unistd.h>
 
-//要区别EventLoop和对应的loop函数，这里是对象
-Channel::Channel(EventLoop* _loop,int _fd):loop(_loop),fd(_fd),
-                                events(0),ready(0),inEpoll(false){
+Channel::Channel(EventLoop* loop, int fd) :
+            pooling(false),
+            loop_(loop),
+            fd_(fd),
+            tied_(false),
+            events_(0),
+            revents_(0),
+            handlingEvents_(false)
+{}
 
+Channel::~Channel() {
+    assert(!handlingEvents_ && "handling Events while Channel destructing");
 }
-Channel::~Channel(){
-    if(fd != -1){
-        close(fd);
-        fd = -1;
-    }
+
+void Channel::setReadCallback(const ReadCallback& callback) {
+    readCallback_ = callback;
+}
+void Channel::setWriteCallback(const WriteCallback& callback) {
+    writeCallback_ = callback;
+}
+void Channel::setCloseCallback(const CloseCallback& callback) {
+    closeCallback_ = callback;
+}
+void Channel::setErrorCallback(const ErrorCallback& callback) {
+    errorCallback_ = callback;
 }
 
-void Channel::handleEvent(){
-    if(ready & (EPOLLIN | EPOLLPRI)){
-        if(readCallback){  // 检查回调函数是否为空，避免空指针调用
-            if(useThreadPool)       
-                loop->addThread(readCallback);
-            else
-                readCallback();
+void Channel::handleEvents() {
+    loop_->assertInLoopThread();
+    
+    /**
+     * Channel总是作为另一个对象的成员，比如Timer、Acceptor、TCPConnection
+     * TCPConnection用shared_ptr来管理，当使用TCPConnect中的Channel对象，
+     * 调用其相关方法时，TcpConnect可能提前执行析构，这种内存释放顺序是错误的，
+     * 因此使用weak_ptr来延长对象的生命周期，相当于上了个锁，Channel执行完
+     * 其母对象才能执行析构流程
+    **/
+    
+    if (tied_) {
+        auto guard = tie_.lock();
+        if (guard != nullptr) {
+            handleEventWithGuard();
         }
     }
-    if(ready & (EPOLLOUT)){
-        if(writeCallback){  
-            if(useThreadPool)       
-                loop->addThread(writeCallback);
-            else
-                writeCallback();
-        }
+    else handleEventWithGuard();
+}
+int Channel::fd() const {
+    return fd_;
+}
+bool Channel::isNoneEvents() const {
+    return events_ == 0;
+}
+unsigned Channel::events() const {
+    return events_;
+}
+void Channel::setRevents(unsigned revents) {
+    revents_ = revents;
+}
+void Channel::tie(const std::shared_ptr<void>& rhs) {
+    tie_ = rhs;
+    tied_ = true;
+}
+
+void Channel::enableRead() {
+    events_ |= (EPOLLIN | EPOLLPRI);
+    update();
+}
+void Channel::enableWrite() {
+    events_ |= EPOLLOUT;
+    update();
+}
+void Channel::disableRead() {
+    events_ &= ~EPOLLIN;
+    update();
+}
+void Channel::disableWrite() {
+    events_ &= ~EPOLLOUT;
+    update();
+}
+void Channel::disableAll() {
+    events_ = 0;
+    update();
+}
+
+bool Channel::isReading() const {
+    return events_ & EPOLLIN;
+}
+bool Channel::isWriting() const {
+    return events_ & EPOLLOUT;
+}
+
+// 兼容旧 API
+void Channel::useET() {
+    // 边缘触发模式在 Epoll 中通过 EPOLLET 标志设置
+    // 这里暂时不实现，因为需要在 Epoll::updateChannel 中处理
+    // 为了兼容性，先保留空实现
+}
+
+void Channel::setUseThreadPool(bool use) {
+    // 已废弃：线程池的使用应该在更高层处理
+    // 保留此方法以兼容旧代码，不做任何操作
+    (void)use;  // 避免未使用参数警告
+}
+
+void Channel::update() {
+    loop_->updateChannel(this);
+}
+void Channel::remove() {
+    assert(this->pooling);
+    loop_->removeChannel(this);
+}
+
+void Channel::handleEventWithGuard() {
+    handlingEvents_ = true;
+    // 调用前都要判断回调函数已注册
+    if ((revents_ & EPOLLHUP) && !(revents_ & EPOLLIN)) {
+        if (closeCallback_) closeCallback_();
     }
-}
-
-void Channel::enableRead(){
-    events |= EPOLLIN | EPOLLPRI;
-    loop -> updateChannel(this);
-}
-
-void Channel::useET(){
-    events |= EPOLLET;
-    loop->updateChannel(this);
-}
-
-int Channel::getFd(){
-    return fd;
-}
-uint32_t Channel::getEvents(){
-    return events;
-}
-uint32_t Channel::getReady(){
-    return ready;
-}
-
-bool Channel::getInEpoll(){
-    return inEpoll;
-}
-
-void Channel::setInEpoll(bool _in){
-    inEpoll = _in;
-}
-
-void Channel::setReady(uint32_t _ev){
-    ready = _ev;
-}
-
-void Channel::setReadCallback(std::function<void ()> _cb){
-    readCallback = _cb;
-}
-void Channel::setUseThreadPool(bool use){
-    useThreadPool = use;
+    if (revents_ & EPOLLERR) {
+        if (errorCallback_) errorCallback_();
+    }
+    if (revents_ & (EPOLLIN | EPOLLPRI | EPOLLRDHUP)) {
+        if (readCallback_) readCallback_();
+    }
+    if (revents_ & EPOLLOUT) {
+        if (writeCallback_) writeCallback_();
+    }
+    handlingEvents_ = false;
 }

@@ -1,58 +1,83 @@
 #include "Epoll.h"
-#include "utils.h"
 #include "Channel.h"
-#include <strings.h>
-#include <sys/epoll.h>
+#include "EventLoop.h"
+#include "utils.h"
 #include <unistd.h>
-#include <string.h>
-#include <vector>
+#include <cerrno>
 
-#define MAX_EVENTS 1000
-
-
-Epoll::Epoll() : epfd(-1),events(nullptr){
-    epfd = epoll_create1(0);
-    errif(epfd == -1, "epoll create error");
-    events = new epoll_event[MAX_EVENTS];
-    bzero(events, sizeof(*events) * MAX_EVENTS);
-}
-
-Epoll::~Epoll(){
-    if(epfd != -1){
-        close(epfd);
-        epfd = -1;
+Epoll::Epoll(EventLoop* loop)
+        : loop_(loop),
+          events_(128),
+          epollfd_(epoll_create1(EPOLL_CLOEXEC))
+{
+    if (epollfd_ == -1) {
+        errif(true, "Epoll::epoll_create1");
     }
-    delete [] events;
 }
-std::vector<Channel*>Epoll::poll(int timeout){
-    std::vector<Channel*> activeChannels;
-    int nfds = epoll_wait(epfd, events, MAX_EVENTS, timeout);
-    errif(nfds == -1, "epoll wait error");
-    for(int i = 0;i<nfds;++i){
-        Channel *ch = (Channel*)events[i].data.ptr;
-        ch->setReady(events[i].events);
-        activeChannels.push_back(ch);
-    }
-    return activeChannels;
-}
-
-void Epoll::updateChannel(Channel * chan){
-    int fd = chan->getFd();
-    struct epoll_event ev;
-    bzero(&ev, sizeof(ev));
-    //用epoll_event封装的channel来快速获取上下文信息
-    ev.data.ptr = chan;
-    ev.events = chan->getEvents();
-    if(!chan->getInEpoll()){
-        errif(epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev) == -1, "epoll add error");
-        chan->setInEpoll(true);        
-    }else{
-        errif(epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &ev), "epoll modify error");
+Epoll::~Epoll() {
+    if (epollfd_ != -1) {
+        close(epollfd_);
+        epollfd_ = -1;
     }
 }
 
-void Epoll::deleteChannel(Channel *chan){
-    int fd = chan->getFd();
-    errif(epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL) == -1, "epoll delete error");
-    chan->setInEpoll(false);
+void Epoll::poll(ChannelList& activeChannels, int timeout) {
+    // loop_->assertInLoopThread(); // 暂时注释，避免循环依赖
+    int maxEvents = static_cast<int>(events_.size());
+    // 得到触发的event个数，并将epoll_event写入events_缓冲区，最多一次获取128个(初始参数，可调)
+    int nEvents = epoll_wait(epollfd_, events_.data(), maxEvents, timeout);
+    if (nEvents == -1) {
+        if (errno != EINTR) { // signal: interrupted sys call
+            errif(true, "Epoll::epoll_wait");
+        }
+    }
+    else if (nEvents > 0) {
+        // 得到触发的event个数，并依次访问操作
+        for (int i = 0; i < nEvents; ++i) {
+            //epoll_event中的epoll_data_t中存对应Channel的指针
+            auto channelPtr = static_cast<Channel*>(events_[i].data.ptr); 
+            channelPtr->setRevents(events_[i].events); // 事件类型
+            activeChannels.push_back(channelPtr); //把该Channel放入活跃队列中
+        }
+        if (nEvents == maxEvents) {
+            events_.resize(2 * events_.size()); // 扩容
+        }
+    }
+}
+
+void Epoll::updateChannel(Channel* channel) {
+    // loop_->assertInLoopThread(); // 暂时注释，避免循环依赖
+    int op = 0;
+    // 更新Channel的几种情况
+    if (!channel->pooling) { // 如果当前Channel没有被管理，那么这里的更新操作一定是要添加到epoll管理
+        assert(!channel->isNoneEvents()); // 既然是新的待添加管理的对象，那么一定是event，设置过想要监听的操作类型
+        op = EPOLL_CTL_ADD;
+        channel->pooling = true;
+    }
+    else if (!channel->isNoneEvents()) { // 如果已经被管理了，并且传入的仍然是event，说明是想修改已注册的epfd上的操作或属性
+        op = EPOLL_CTL_MOD;
+    }
+    else { // 如果已经被管理，并且传入的不是一个event，表示想要将该注册过的Channel给删除
+        op = EPOLL_CTL_DEL;
+        channel->pooling = false;
+    }
+    updateChannel(op, channel);
+}
+
+void Epoll::removeChannel(Channel* channel) {
+    if (channel->pooling) {
+        updateChannel(EPOLL_CTL_DEL, channel);
+        channel->pooling = false;
+    }
+}
+
+void Epoll::updateChannel(int op, Channel* channel) {
+    epoll_event epEv;
+    epEv.events = channel->events();
+    // 在注册事件的时候，附带上了Channel指针，因此epoll_wait得到的event中包含了
+    // 事件和对应的Channel指针，因此，不需要单独存储fd->Channel*的映射
+    epEv.data.ptr = channel;
+    if (epoll_ctl(epollfd_, op, channel->fd(), &epEv) == -1) {
+        errif(true, "Epoll::epoll_ctl");
+    }
 }

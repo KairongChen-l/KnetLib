@@ -3,3 +3,6 @@ build/
 .cache
 .clangd
 .vscode
+github
+IMPROVEMENT_PLAN.md
+STAGE1_COMPLETED.md

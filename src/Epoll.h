@@ -1,17 +1,28 @@
 #pragma once
+
+#include "noncopyable.h"
 #include <sys/epoll.h>
 #include <vector>
 
 class Channel;
-class Epoll{
-private:
-    int epfd;
-    struct epoll_event *events;
+class EventLoop;
+
+class Epoll: noncopyable {
+
 public:
-    Epoll();
+    using ChannelList = std::vector<Channel*>;
+
+    explicit Epoll(EventLoop* loop);
     ~Epoll();
 
-    void updateChannel(Channel*);
-    void deleteChannel(Channel*);
-    std::vector<Channel*> poll(int timeout = -1);
+    void poll(ChannelList& activeChannels, int timeout = -1);
+    void updateChannel(Channel* channel);
+    void removeChannel(Channel* channel);
+
+private:
+    void updateChannel(int op, Channel* channel);
+    EventLoop* loop_;
+    std::vector<epoll_event> events_;
+    int epollfd_;
+
 };
