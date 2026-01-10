@@ -11,7 +11,7 @@ private:
     EventLoop* loop;
     Socket *sock;
     Channel* chan;
-    std::function<void(Socket*)> deleteConnectionCallBack;
+    std::function<void(int)> deleteConnectionCallBack;
     std::string *inBuffer; //TODO：放在private域，目前用不了
     Buffer *readBuffer;
 public:
@@ -19,5 +19,7 @@ public:
     ~Connection();
 
     void echo(int sockfd);
-    void setDeleteConnectionCallBack(std::function<void(Socket*)>);
+    void setDeleteConnectionCallBack(std::function<void(int)>);
+    void send(int sockfd);
+
 };

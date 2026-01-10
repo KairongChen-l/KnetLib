@@ -19,23 +19,33 @@ Channel::~Channel(){
 
 void Channel::handleEvent(){
     if(ready & (EPOLLIN | EPOLLPRI)){
-        if(useThreadPool)       
-            loop->addThread(readCallback);
-        else
-            readCallback();
+        if(readCallback){  // 检查回调函数是否为空，避免空指针调用
+            if(useThreadPool)       
+                loop->addThread(readCallback);
+            else
+                readCallback();
+        }
     }
     if(ready & (EPOLLOUT)){
-        if(useThreadPool)       
-            loop->addThread(writeCallback);
-        else
-            writeCallback();
+        if(writeCallback){  
+            if(useThreadPool)       
+                loop->addThread(writeCallback);
+            else
+                writeCallback();
+        }
     }
 }
 
-void Channel::enableReading(){
-    events |= EPOLLIN | EPOLLET;
+void Channel::enableRead(){
+    events |= EPOLLIN | EPOLLPRI;
     loop -> updateChannel(this);
 }
+
+void Channel::useET(){
+    events |= EPOLLET;
+    loop->updateChannel(this);
+}
+
 int Channel::getFd(){
     return fd;
 }
@@ -50,8 +60,8 @@ bool Channel::getInEpoll(){
     return inEpoll;
 }
 
-void Channel::setInEpoll(){
-    inEpoll = true;
+void Channel::setInEpoll(bool _in){
+    inEpoll = _in;
 }
 
 void Channel::setReady(uint32_t _ev){

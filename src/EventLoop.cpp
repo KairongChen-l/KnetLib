@@ -11,6 +11,7 @@ EventLoop::EventLoop():ep(nullptr),quit(false){
 
 EventLoop::~EventLoop(){
     delete ep;
+    delete threadPool;  //删除 threadPool，避免内存泄漏
 }
 
 void EventLoop::loop(){

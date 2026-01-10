@@ -21,13 +21,14 @@ public:
     ~Channel();
 
     void handleEvent();
-    void enableReading();
+    void enableRead();
 
     int getFd();
     uint32_t getEvents();
     uint32_t getReady();
     bool getInEpoll();
-    void setInEpoll();
+    void setInEpoll(bool _in = true);
+    void useET();
 
     // void setEvents(uint32_t);
     void setReady(uint32_t);
