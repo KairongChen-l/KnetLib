@@ -3,11 +3,14 @@
 #include "noncopyable.h"
 #include "Callbacks.h"
 #include "Epoll.h"
+#include "TimerQueue.h"
+#include "Timestamp.h"
 #include <atomic>
 #include <mutex>
 #include <vector>
 
 class Channel;
+class Timer;
 
 class EventLoop: noncopyable {
 
@@ -26,6 +29,12 @@ public:
     // 把任务放入队列中，唤醒loop所在的线程执行task
     void queueInLoop(const Task& task);
     void queueInLoop(Task&& task);
+
+    // 定时器功能
+    Timer* runAt(Timestamp when, TimerCallback callback);
+    Timer* runAfter(Nanoseconds interval, TimerCallback callback);
+    Timer* runEvery(Nanoseconds interval, TimerCallback callback);
+    void cancelTimer(Timer* timer);
 
     // 通过wakeupfd_/wakeupChannel_唤醒loop所在的线程
     void wakeup();
@@ -53,4 +62,5 @@ private:
     Channel* wakeupChannel_;
     std::mutex mutex_;
     std::vector<Task> pendingTasks_;
+    TimerQueue timerQueue_;
 };

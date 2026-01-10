@@ -38,7 +38,8 @@ EventLoop::EventLoop()
           doingPendingTasks_(false),
           poller_(this),
           wakeupfd_(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)),
-          wakeupChannel_(nullptr)
+          wakeupChannel_(nullptr),
+          timerQueue_(this)
 {
     // 检查用于事件通知的文件描述符是否被正确创建
     if (wakeupfd_ == -1) {
@@ -173,6 +174,24 @@ void EventLoop::doPendingTasks() {
 }
 
 // 将唤醒用的写入uint64_t给消耗掉
+Timer* EventLoop::runAt(Timestamp when, TimerCallback callback) {
+    // 添加一个定时器
+    return timerQueue_.addTimer(std::move(callback), when, Milliseconds::zero());
+}
+
+Timer* EventLoop::runAfter(Nanoseconds interval, TimerCallback callback) {
+    return runAt(clock::now() + interval, std::move(callback));
+}
+
+//每隔interval长度的时间触发一次
+Timer* EventLoop::runEvery(Nanoseconds interval, TimerCallback callback) {
+    return timerQueue_.addTimer(std::move(callback), clock::now() + interval, interval);
+}
+
+void EventLoop::cancelTimer(Timer* timer) {
+    timerQueue_.cancelTimer(timer);
+}
+
 void EventLoop::handleRead() {
     uint64_t one;
     ssize_t n = read(wakeupfd_, &one, sizeof(one));

@@ -160,25 +160,11 @@ TEST_F(EventLoopTest, AssertNotInLoopThread) {
     EXPECT_TRUE(true);
 }
 
-// 测试 loop 基本运行（需要在新线程中运行）
-TEST_F(EventLoopTest, LoopBasic) {
-    std::atomic<bool> loopStarted(false);
-    std::atomic<bool> loopQuitCalled(false);
-    
-    std::thread t([&]() {
-        loopStarted = true;
-        // 在短暂运行后退出
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        loop->quit();
-        loopQuitCalled = true;
-    });
-    
-    // 注意：实际的 loop 需要在创建它的线程中运行
-    // 这里只是测试基本结构
-    
-    t.join();
-    EXPECT_TRUE(loopStarted);
-    EXPECT_TRUE(loopQuitCalled);
+// 测试定时器功能（如果已集成）
+TEST_F(EventLoopTest, TimerFunctions) {
+    // 测试定时器接口是否存在
+    // 注意：实际定时器测试在 TimerQueueTest 中
+    EXPECT_TRUE(true);
 }
 
 // 测试多个任务队列

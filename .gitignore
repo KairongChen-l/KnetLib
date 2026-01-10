@@ -1,13 +1,10 @@
 doc/
 build/
+implement_doc/
+test_doc
 .cache
 .clangd
 .vscode
 github
-IMPROVEMENT_PLAN.md
-STAGE1_COMPLETED.md
-STAGE2_COMPLETED.md
-STAGE3_COMPLETED.md
-TESTING.md
 GOOGLETEST_SETUP.md
 run_tests.sh
