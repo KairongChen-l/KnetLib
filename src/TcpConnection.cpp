@@ -1,5 +1,6 @@
 #include "TcpConnection.h"
 #include "EventLoop.h"
+#include "Logger.h"
 #include "utils.h"
 #include <sys/socket.h>
 #include <unistd.h>
@@ -31,10 +32,13 @@ TcpConnection::TcpConnection(EventLoop* loop, int sockfd, const InetAddress& loc
     channel_.setWriteCallback([this](){handleWrite();});
     channel_.setCloseCallback([this](){handleClose();});
     channel_.setErrorCallback([this](){handleError();});
+
+    TRACE("TcpConnection() {} fd={}", name().c_str(), sockfd_);
 }
 
 TcpConnection::~TcpConnection() {
     assert(state_ == kDisconnected);
+    TRACE("~TcpConnection() {} fd={}", name().c_str(), sockfd_);
     if (sockfd_ != -1) {
         close(sockfd_);
     }
@@ -92,6 +96,7 @@ void TcpConnection::send(const std::string& data) {
 }
 void TcpConnection::send(const char* data, size_t len) {
     if (state_ != kConnected) {
+        WARN("TcpConnection::send() not connected, give up send");
         return;
     }
     // 在自己所属的EventLoop中
@@ -107,6 +112,7 @@ void TcpConnection::send(const char* data, size_t len) {
 }
 void TcpConnection::send(Buffer& buffer) {
     if (state_ != kConnected) {
+        WARN("TcpConnection::send() not connected, give up send");
         return;
     }
     if (loop_->isInLoopThread()) {
@@ -170,6 +176,7 @@ void TcpConnection::handleRead() {
     ssize_t n = inputBuffer_.readFd(sockfd_, &savedErrno);
     if (n == -1) {
         errno = savedErrno;
+        SYSERR("TcpConnection::read()");
         handleError();
     }
     else if (n == 0) {
@@ -183,13 +190,14 @@ void TcpConnection::handleRead() {
 }
 void TcpConnection::handleWrite() {
     if (state_ == kDisconnected) {
+        WARN("TcpConnection::handleWrite() disconnected, give up writing %zu bytes", outputBuffer_.readableBytes());
         return;
     }
     assert(outputBuffer_.readableBytes() > 0);
     assert(channel_.isWriting());
     ssize_t n = ::write(sockfd_, outputBuffer_.peek(), outputBuffer_.readableBytes());
     if (n == -1) {
-        // 错误处理
+        SYSERR("TcpConnection::write()");
     }
     else {
         outputBuffer_.retrieve(static_cast<size_t>(n));
@@ -218,12 +226,13 @@ void TcpConnection::handleError() {
     int ret = getsockopt(sockfd_, SOL_SOCKET, SO_ERROR, &err, &len);
     if (ret != -1)
         errno = err;
-    // 错误处理
+    SYSERR("TcpConnection::handleError()");
 }
 
 void TcpConnection::sendInLoop(const char *data, size_t len) {
     loop_->assertInLoopThread();
     if (state_ == kDisconnected) {
+        WARN("TcpConnection::sendInLoop() disconnected, give up send");
         return;
     }
     ssize_t n = 0;
@@ -238,6 +247,7 @@ void TcpConnection::sendInLoop(const char *data, size_t len) {
         n = ::write(sockfd_, data, len);
         if (n == -1) {
             if (errno != EAGAIN) {
+                SYSERR("TcpConnection::write()");
                 if (errno == EPIPE || errno == ECONNRESET)
                     faultError = true;
             }
@@ -277,7 +287,7 @@ void TcpConnection::shutdownInLoop() {
     loop_->assertInLoopThread();
     if (state_ != kDisconnected && !channel_.isWriting()) {
         if (::shutdown(sockfd_, SHUT_WR) == -1) {
-            // 错误处理
+            SYSERR("TcpConnection::shutdown()");
         }
     }
 }

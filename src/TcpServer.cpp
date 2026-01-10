@@ -1,5 +1,6 @@
 #include "TcpServer.h"
 #include "EventLoop.h"
+#include "Logger.h"
 #include <cassert>
 
 TcpServer::TcpServer(EventLoop* loop, const InetAddress& local)
@@ -9,6 +10,7 @@ TcpServer::TcpServer(EventLoop* loop, const InetAddress& local)
           local_(local)
 {
     assert(baseLoop_ != nullptr);
+    INFO("create TcpServer %s", local.toIpPort().c_str());
 }
 
 TcpServer::~TcpServer() {
@@ -22,6 +24,7 @@ TcpServer::~TcpServer() {
             thread->join();
         }
     }
+    TRACE("~TcpServer");
 }
 
 void TcpServer::setNumThread(size_t n) {
@@ -31,7 +34,7 @@ void TcpServer::setNumThread(size_t n) {
         eventLoops_.resize(n);
     }
     else {
-        assert(false && "TcpServer::setNumThread n <= 0");
+        ERROR("TcpServer::setNumThread n <= 0");
     }
 }
 
@@ -55,6 +58,8 @@ void TcpServer::setWriteCompleteCallback(const WriteCompleteCallback& callback) 
 }
 
 void TcpServer::startInLoop() {
+    INFO("TcpServer::start() %s with %zu eventLoop thread(s)", local_.toIpPort().c_str(), numThreads_);
+    
     baseServer_ = std::make_unique<TcpServerSingle>(baseLoop_, local_);
     /**
      * 如果想改主从Reactor结构，从这里入手，如果只有一个Reactor，则baseServer_回调即为外部传进来的回调，否则，baseServer_执行自己的回调（TcpServer中添加回调，

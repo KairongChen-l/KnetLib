@@ -2,6 +2,7 @@
 #include "TcpConnection.h"
 #include "Buffer.h"
 #include "EventLoop.h"
+#include "Logger.h"
 
 TcpServerSingle::TcpServerSingle(EventLoop* loop, const InetAddress& local)
         : loop_(loop),
@@ -46,8 +47,7 @@ void TcpServerSingle::closeConnection(const TcpConnectionPtr& conn) {
     loop_->assertInLoopThread();
     size_t ret = connections_.erase(conn);
     if (ret != 1) {
-        // 错误处理：连接不在集合中
-        assert(false && "TcpServerSingle::closeConnection connection not found");
+        FATAL("TcpServerSingle::closeConnection connection set erase fatal, ret = %zu", ret);
     }
     if (connectionCallback_) {
         connectionCallback_(conn);

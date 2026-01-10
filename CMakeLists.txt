@@ -124,8 +124,18 @@ target_link_libraries(EventLoopTest
     GTest::gtest_main
 )
 
+add_executable(LoggerTest
+    test/LoggerTest.cpp
+)
+target_link_libraries(LoggerTest 
+    PRIVATE 
+    knetlib_lib
+    GTest::gtest 
+    GTest::gtest_main
+)
+
 # 设置测试输出目录
-set_target_properties(BufferTest ChannelTest EventLoopTest PROPERTIES
+set_target_properties(BufferTest ChannelTest EventLoopTest LoggerTest PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
@@ -134,11 +144,12 @@ include(GoogleTest)
 add_test(NAME BufferTest COMMAND BufferTest)
 add_test(NAME ChannelTest COMMAND ChannelTest)
 add_test(NAME EventLoopTest COMMAND EventLoopTest)
+add_test(NAME LoggerTest COMMAND LoggerTest)
 
 # 添加测试运行目标
 add_custom_target(run-test
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
-    DEPENDS BufferTest ChannelTest EventLoopTest
+    DEPENDS BufferTest ChannelTest EventLoopTest LoggerTest
     COMMENT "Running all tests"
 )
 

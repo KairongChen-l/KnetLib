@@ -1,5 +1,6 @@
 #include "Acceptor.h"
 #include "EventLoop.h"
+#include "Logger.h"
 #include "utils.h"
 #include <sys/socket.h>
 #include <fcntl.h>
@@ -12,7 +13,7 @@ namespace {
 int createSocket() {
     int ret = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if (ret == -1) {
-        errif(true, "Acceptor createSocket");
+        SYSFATAL("Acceptor createSocket");
     }
     return ret;
 }
@@ -29,15 +30,15 @@ Acceptor::Acceptor(EventLoop* loop, const InetAddress& local)
     int on = 1;
     int ret = setsockopt(acceptfd_, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
     if (ret == -1) {
-        errif(true, "Acceptor setsockopt SO_REUSEADDR");
+        SYSFATAL("Acceptor setsockopt SO_REUSEADDR");
     }
     ret = setsockopt(acceptfd_, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on));
     if (ret == -1) {
-        errif(true, "Acceptor setsockopt SO_REUSEPORT");
+        SYSFATAL("Acceptor setsockopt SO_REUSEPORT");
     }
     ret = bind(acceptfd_, local.getSockaddr(), local.getSocklen());
     if (ret == -1) {
-        errif(true, "Acceptor bind");
+        SYSFATAL("Acceptor bind");
     }
 }
 
@@ -55,7 +56,7 @@ void Acceptor::listen() {
     loop_->assertInLoopThread();
     int ret = ::listen(acceptfd_, SOMAXCONN);
     if (ret == -1) {
-        errif(true, "Acceptor listen fatal");
+        SYSFATAL("Acceptor listen fatal");
     }
     listening_ = true;
     acceptChannel_.setReadCallback([this](){handleRead();}); // 当有连接请求到来时，交由handleRead处理
@@ -75,14 +76,14 @@ void Acceptor::handleRead() {
     int sockfd = ::accept4(acceptfd_, reinterpret_cast<sockaddr*>(&addr), &len, SOCK_NONBLOCK | SOCK_CLOEXEC);
     if (sockfd == -1) {
         int savedErrno = errno;
-        // 错误处理
+        SYSERR("Acceptor accept4()");
         switch (savedErrno) {
             case ECONNABORTED: // connection aborted
             case EMFILE: // 文件描述符用完了
-                // 可以在这里添加日志输出
+                ERROR("%s", strerror(savedErrno));
                 break;
             default:
-                errif(true, "unexpected accept4() error");
+                FATAL("unexpected accept4() error");
         }
         return;
     }
