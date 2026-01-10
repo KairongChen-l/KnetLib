@@ -1,40 +1,35 @@
+// from muduo::Buffer
+
+#include <cerrno>
+#include <sys/uio.h>
 #include "Buffer.h"
-#include <string.h>
-#include <iostream>
 
-Buffer::Buffer(){
+const char Buffer::kCRLF[] = "\r\n";
 
-}
+const size_t Buffer::kCheapPrepend;
+const size_t Buffer::kInitialSize;
 
-Buffer::~Buffer(){
+ssize_t Buffer::readFd(int fd, int* savedErrno)
+{
+    char extrabuf[65536];
+    struct iovec vec[2];
+    const size_t writable = writableBytes();
+    vec[0].iov_base = begin() + writerIndex_;
+    vec[0].iov_len = writable;
+    vec[1].iov_base = extrabuf;
+    vec[1].iov_len = sizeof extrabuf;
+    // when there is enough space in this buffer, don't read into extrabuf.
+    // when extrabuf is used, we read 128k-1 bytes at most.
+    const int iovcnt = (writable < sizeof extrabuf) ? 2 : 1;
+    const ssize_t n = ::readv(fd, vec, iovcnt);
 
-}
-
-void Buffer::append(const char *_str, int _size){
-    for(int i = 0;i < _size;++i){
-        if(_str[i] == '\0') break;
-        buf.push_back(_str[i]);
+    if (n < 0)
+        *savedErrno = errno;
+    else if (static_cast<size_t>(n) <= writable)
+        writerIndex_ += n;
+    else {
+        writerIndex_ = buffer_.size();
+        append(extrabuf, n - writable);
     }
-}
-
-ssize_t Buffer::size(){
-    return buf.size();
-}
-
-const char* Buffer::c_str(){
-    return buf.c_str();
-}
-
-void Buffer::clear(){
-    buf.clear();
-}
-
-void Buffer::getline(){
-    buf.clear();
-    std::getline(std::cin, buf);
-}
-
-void Buffer::setBuf(const char* _buf){
-    buf.clear();
-    buf.append(_buf);
+    return n;
 }
