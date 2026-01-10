@@ -2,6 +2,7 @@
 #include "Channel.h"
 #include "EventLoop.h"
 #include "utils.h"
+#include <cassert>
 #include <unistd.h>
 #include <cerrno>
 
