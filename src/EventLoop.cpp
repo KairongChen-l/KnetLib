@@ -7,6 +7,7 @@
 #include "EventLoop.h"
 #include "Channel.h"
 #include "utils.h"
+#include "Logger.h"
 
 namespace {
 
@@ -55,15 +56,31 @@ EventLoop::EventLoop()
 }
 
 EventLoop::~EventLoop() {
+    // 注意：析构函数可能在 EventLoop 线程中调用（正常情况），
+    // 也可能在其他线程中调用（比如测试场景）
+    // 如果不在 EventLoop 线程中，我们不能调用 disableAll()，因为它会调用 updateChannel()
+    // 而是直接移除 channel 并删除
     if (wakeupChannel_) {
-        wakeupChannel_->disableAll(); // 移除对wakeupChannel_的监听
+        // 如果我们在 EventLoop 线程中，可以安全地调用 disableAll()
+        // 否则，直接移除 channel（此时 EventLoop 已经退出，不需要更新 epoll）
+        if (isInLoopThread()) {
+            wakeupChannel_->disableAll(); // 移除对wakeupChannel_的监听
+        } else {
+            // 不在 EventLoop 线程中，直接移除 channel（如果已经在 epoll 中）
+            if (wakeupChannel_->pooling) {
+                poller_.removeChannel(wakeupChannel_);
+            }
+        }
         delete wakeupChannel_;
     }
     if (wakeupfd_ != -1) {
         close(wakeupfd_); // 释放资源
     }
-    assert(t_Eventloop == this);
-    t_Eventloop = nullptr;
+    // 只有在 EventLoop 线程中才检查 t_Eventloop
+    if (isInLoopThread()) {
+        assert(t_Eventloop == this);
+        t_Eventloop = nullptr;
+    }
 }
 
 void EventLoop::loop() {
@@ -127,8 +144,11 @@ void EventLoop::wakeup() {
     uint64_t one = 1;
     ssize_t n = write(wakeupfd_, &one, sizeof(one));
     if (n != sizeof(one)) {
-        // 错误处理：这里暂时使用简单的错误处理
-        // 可以后续添加日志系统
+        if (n == -1) {
+            SYSERR("EventLoop::wakeup() write");
+        } else {
+            ERROR("EventLoop::wakeup() wrote %zd bytes instead of %zu", n, sizeof(one));
+        }
     }
 }
 
@@ -180,12 +200,12 @@ Timer* EventLoop::runAt(Timestamp when, TimerCallback callback) {
 }
 
 Timer* EventLoop::runAfter(Nanoseconds interval, TimerCallback callback) {
-    return runAt(clock::now() + interval, std::move(callback));
+    return runAt(time_utils::now() + interval, std::move(callback));
 }
 
 //每隔interval长度的时间触发一次
 Timer* EventLoop::runEvery(Nanoseconds interval, TimerCallback callback) {
-    return timerQueue_.addTimer(std::move(callback), clock::now() + interval, interval);
+    return timerQueue_.addTimer(std::move(callback), time_utils::now() + interval, interval);
 }
 
 void EventLoop::cancelTimer(Timer* timer) {
@@ -196,7 +216,10 @@ void EventLoop::handleRead() {
     uint64_t one;
     ssize_t n = read(wakeupfd_, &one, sizeof(one));
     if (n != sizeof(one)) {
-        // 错误处理：这里暂时使用简单的错误处理
-        // 可以后续添加日志系统
+        if (n == -1) {
+            SYSERR("EventLoop::handleRead() read");
+        } else {
+            ERROR("EventLoop::handleRead() read %zd bytes instead of %zu", n, sizeof(one));
+        }
     }
 }

@@ -9,7 +9,7 @@
 class InetAddress
 {
 public:
-    explicit InetAddress(uint16_t port = 0, bool loopback = false);
+    explicit InetAddress(uint16_t port, bool loopback = false);
     InetAddress(const std::string& ip, uint16_t port);
     InetAddress();  // 默认构造，用于 accept
 

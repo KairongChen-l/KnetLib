@@ -10,35 +10,83 @@
 class TcpConnectionTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        loop = new EventLoop();
-        InetAddress local("127.0.0.1", 0);
-        InetAddress peer("127.0.0.1", 0);
+        // 在 EventLoop 线程中创建 EventLoop 和 TcpConnection
+        // 这样可以避免 assertInLoopThread() 失败
+        loop = nullptr;
+        connection = nullptr;
         
-        int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-        connection = std::make_shared<TcpConnection>(loop, sockfd, local, peer);
+        std::atomic<bool> ready(false);
+        loopThread = std::thread([this, &ready]() {
+            loop = new EventLoop();
+            InetAddress local("127.0.0.1", 0);
+            InetAddress peer("127.0.0.1", 0);
+            
+            int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+            connection = std::make_shared<TcpConnection>(loop, sockfd, local, peer);
+            ready = true;
+            
+            // 运行 EventLoop 以处理可能的异步操作
+            // 注意：loop() 会阻塞，直到 quit() 被调用
+            loop->loop();
+        });
+        
+        // 等待 EventLoop 和 TcpConnection 创建完成
+        while (!ready.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
     void TearDown() override {
-        connection.reset();
+        // 在 EventLoop 线程中关闭连接
+        if (loop && connection) {
+            loop->runInLoop([this]() {
+                if (connection && !connection->disconnected()) {
+                    connection->forceClose();
+                }
+            });
+        }
+        
+        // 退出 EventLoop
         if (loop) {
             loop->quit();
+        }
+        
+        // 等待 EventLoop 线程退出
+        if (loopThread.joinable()) {
+            loopThread.join();
+        }
+        
+        // 清理资源
+        connection.reset();
+        if (loop) {
             delete loop;
+            loop = nullptr;
         }
     }
 
     EventLoop* loop;
     TcpConnectionPtr connection;
+    std::thread loopThread;
 };
 
 // 测试基本构造
 TEST_F(TcpConnectionTest, Constructor) {
+    // 注意：TcpConnection 初始状态是 kConnecting，不是 kDisconnected
+    // 所以 disconnected() 返回 false 是正常的
     EXPECT_FALSE(connection->connected());
-    EXPECT_TRUE(connection->disconnected());
+    EXPECT_FALSE(connection->disconnected()); // 初始状态是 kConnecting
 }
 
 // 测试 connectEstablished
 TEST_F(TcpConnectionTest, ConnectEstablished) {
-    connection->connectEstablished();
+    // connectEstablished 需要在 EventLoop 线程中调用
+    if (loop) {
+        loop->runInLoop([this]() {
+            connection->connectEstablished();
+        });
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     EXPECT_TRUE(connection->connected());
     EXPECT_FALSE(connection->disconnected());
 }

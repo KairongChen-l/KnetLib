@@ -42,7 +42,10 @@ void TcpClient::setWriteCompleteCallback(const WriteCompleteCallback& callback) 
     writeCompleteCallback_ = callback;
 }
 void TcpClient::setErrorCallback(const ErrorCallback& callback) {
-    connector_->setErrorCallback(callback);
+    errorCallback_ = callback;
+    if (connector_) {
+        connector_->setErrorCallback(callback);
+    }
 }
 
 void TcpClient::start() {
@@ -56,6 +59,8 @@ void TcpClient::retry() {
     if (connected_) return;
 
     WARN("TcpClient::retry() reconnect %s...", peer_.toIpPort().c_str());
+    // 先重置旧的 connector，确保资源正确释放
+    connector_.reset();
     connector_ = std::make_unique<Connector>(loop_, peer_);
     connector_->setNewConnectionCallback(std::bind(
             &TcpClient::newConnection, 
@@ -64,6 +69,10 @@ void TcpClient::retry() {
             std::placeholders::_2, 
             std::placeholders::_3
     ));
+    // 设置错误回调（如果有的话）
+    if (errorCallback_) {
+        connector_->setErrorCallback(errorCallback_);
+    }
     connector_->start();
 }
 
@@ -84,13 +93,28 @@ void TcpClient::newConnection(int connfd, const InetAddress& local, const InetAd
     }
 }
 
+void TcpClient::disconnect() {
+    if (connection_ && !connection_->disconnected()) {
+        if (loop_->isInLoopThread()) {
+            connection_->shutdown();
+        } else {
+            loop_->runInLoop([this]() {
+                if (connection_ && !connection_->disconnected()) {
+                    connection_->shutdown();
+                }
+            });
+        }
+    }
+}
+
 void TcpClient::closeConnection(const TcpConnectionPtr& conn) {
     loop_->assertInLoopThread();
-    assert(connection_ != nullptr);
     connected_ = false;
+    // 注意：connection_ 可能已经被重置，所以先保存回调
+    ConnectionCallback cb = connectionCallback_;
     connection_.reset();
-    if (connectionCallback_) {
-        connectionCallback_(conn);
+    if (cb) {
+        cb(conn);
     }
 }
 

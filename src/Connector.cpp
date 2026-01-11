@@ -30,6 +30,10 @@ Connector::Connector(EventLoop* loop, const InetAddress& peer)
 }
 
 Connector::~Connector() {
+    // 如果 channel 还在 epoll 中，需要先移除
+    if (started_ && !connected_ && channel_.pooling) {
+        loop_->removeChannel(&channel_);
+    }
     if (!connected_ && sockfd_ != -1) {
         close(sockfd_);
     }

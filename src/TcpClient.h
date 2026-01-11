@@ -22,6 +22,7 @@ public:
     void setErrorCallback(const ErrorCallback&);
 
     void start();
+    void disconnect(); // 断开连接
 
 private:
     void retry();
@@ -39,5 +40,6 @@ private:
     ConnectionCallback connectionCallback_;
     MessageCallback messageCallback_;
     WriteCompleteCallback writeCompleteCallback_;
+    ErrorCallback errorCallback_;
 };
 

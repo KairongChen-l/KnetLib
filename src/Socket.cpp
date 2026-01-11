@@ -45,7 +45,16 @@ int Socket::accept(InetAddress *_addr){
     socklen_t addr_len = sizeof(addr);
     bzero(&addr, addr_len);
     int clnt_sockfd = ::accept(fd, (sockaddr*)&addr, &addr_len);
-    errif(clnt_sockfd == -1, "socket accept error");
+    // 在非阻塞模式下，如果没有连接，accept 会返回 -1，errno 为 EAGAIN/EWOULDBLOCK
+    // 这种情况下不应该报错退出，而是返回 -1 让调用者处理
+    if (clnt_sockfd == -1) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            // 非阻塞模式下没有连接，返回 -1 但不报错
+            return -1;
+        }
+        // 其他错误才报错退出
+        errif(true, "socket accept error");
+    }
     _addr->setInetAddr(addr, addr_len);
     return clnt_sockfd;
 }

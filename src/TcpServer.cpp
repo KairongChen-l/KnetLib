@@ -2,6 +2,8 @@
 #include "EventLoop.h"
 #include "Logger.h"
 #include <cassert>
+#include <thread>
+#include <chrono>
 
 TcpServer::TcpServer(EventLoop* loop, const InetAddress& local)
         : baseLoop_(loop),
@@ -14,11 +16,29 @@ TcpServer::TcpServer(EventLoop* loop, const InetAddress& local)
 }
 
 TcpServer::~TcpServer() {
+    // 在退出 EventLoop 之前，先关闭所有连接
+    // 注意：baseServer_ 在主 EventLoop 中，子线程中的 TcpServerSingle 在栈上
+    if (baseServer_ && baseLoop_) {
+        if (baseLoop_->isInLoopThread()) {
+            baseServer_->stop();
+        } else {
+            baseLoop_->runInLoop([this]() {
+                if (baseServer_) {
+                    baseServer_->stop();
+                }
+            });
+            // 等待关闭操作完成
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+    
+    // 退出所有 EventLoop
     for (auto& loop : eventLoops_) {
         if (loop != nullptr) {
             loop->quit();
         }
     }
+    // 等待子线程退出（子线程中的 TcpServerSingle 会在 EventLoop 退出时析构）
     for (auto& thread : threads_) {
         if (thread && thread->joinable()) {
             thread->join();
@@ -87,6 +107,10 @@ void TcpServer::startInLoop() {
 
 void TcpServer::runInThread(size_t index) {
     EventLoop loop;
+    // 注意：当前实现中，每个子线程都创建了自己的 TcpServerSingle 和 Acceptor
+    // 这意味着每个线程都在监听同一个端口（需要 SO_REUSEPORT 支持）
+    // 这不是标准的主从Reactor模式，标准模式应该是只有主线程监听，然后分配连接给子线程
+    // 当前实现依赖 Linux 的 SO_REUSEPORT 功能，在功能上可以工作，但不是最佳实践
     TcpServerSingle server(&loop, local_); // 子EventLoop中的单独TcpServerSingle实例
 
     server.setConnectionCallback(connectionCallback_);
@@ -104,6 +128,11 @@ void TcpServer::runInThread(size_t index) {
     }
     server.start();
     loop.loop();
+    
+    // 在 EventLoop 退出后，关闭所有连接
+    // 此时我们在 EventLoop 线程中，可以安全地关闭连接
+    server.stop();
+    
     // 子EventLoop是栈上对象，若loop退出，意味着栈空间将回收，将指向子loop的指针置空
     {
         std::lock_guard<std::mutex> guard(mutex_);

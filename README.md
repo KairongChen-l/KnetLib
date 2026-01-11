@@ -1,187 +1,219 @@
-## 代码逻辑
+# KnetLib
 
-本项目是一个基于 **主从 Reactor 模式** 的高性能网络服务器，采用事件驱动架构，使用 epoll 实现 I/O 多路复用，并结合线程池实现多线程并发处理。
+一个基于 Reactor 模式的高性能 C++ 网络库，采用事件驱动架构，支持高并发网络编程。
 
-### 架构层次
+## 特性
 
-#### 1. 系统调用封装层
-
-- **InetAddress**: 封装 `sockaddr_in` 结构体，处理 IP 地址和端口的设置与获取
-- **Socket**: 封装 socket 系统调用，提供 `bind`、`listen`、`accept`、`connect`、`setnonblocking` 等功能
-- **Buffer**: 封装数据缓冲区，使用 `std::string` 实现，提供 `append`、`clear`、`c_str` 等接口
-- **utils**: 提供错误处理函数 `errif`，用于统一的错误检查和退出
-
-#### 2. 事件驱动核心层
-
-- **Epoll**: 
-  - 封装 `epoll_create1`、`epoll_ctl`、`epoll_wait` 系统调用
-  - 管理文件描述符的注册、修改、删除和事件等待
-  - 使用 `epoll_event.data.ptr` 存储 `Channel*` 指针，实现快速上下文获取
-  - 提供 `updateChannel()` 和 `deleteChannel()` 接口
-
-- **Channel**: 
-  - 封装文件描述符（fd）和事件（events、ready）
-  - 每个 fd 对应一个 Channel 对象
-  - 包含读/写回调函数（`readCallback`、`writeCallback`）
-  - 支持边缘触发模式（EPOLLET）
-  - 可选择是否使用线程池执行回调（`useThreadPool`）
-  - 通过 `enableRead()` 注册到 epoll 监听读事件
-
-- **EventLoop**: 
-  - 事件循环核心，不断调用 `epoll_wait` 等待事件
-  - 每个 EventLoop 拥有独立的 Epoll 和 ThreadPool
-  - 获取活跃的 Channel 列表，依次调用 `handleEvent()` 处理事件
-  - 提供 `updateChannel()` 接口用于注册/更新 Channel
-  - 提供 `addThread()` 接口将任务提交到线程池
-
-#### 3. 网络服务器层
-
-- **Acceptor**: 
-  - 负责接受新连接
-  - 创建监听 socket，绑定地址（127.0.0.1:1234），设置为非阻塞模式
-  - 创建 `acceptChannel` 监听服务器 socket 的读事件
-  - 不使用线程池（`setUseThreadPool(false)`），在主线程同步处理
-  - 当有新连接到达时，调用 `acceptConnection()` 接受连接并触发回调
-
-- **Connection**: 
-  - 处理单个客户端连接
-  - 创建 `Channel` 监听客户端 socket 的读事件，使用边缘触发模式
-  - 使用线程池处理回调（`setUseThreadPool(true)`）
-  - 实现 `echo()` 函数：使用非阻塞 I/O 循环读取数据，读取完成后回显
-  - 使用 `Buffer` 存储读取的数据
-  - 连接关闭时（`read` 返回 0）调用删除回调
-  - 提供 `send()` 函数用于发送数据（处理 EAGAIN 情况）
-
-- **Server**: 
-  - 服务器主类，实现主从 Reactor 模式
-  - **主 Reactor（mainReactor）**：在主线程运行，负责接受新连接
-  - **从 Reactors（subReactors）**：多个子事件循环，数量等于 CPU 核心数
-  - **线程池（thpool）**：用于运行子事件循环和处理任务
-  - 使用 `std::map<int, Connection*>` 存储所有活跃连接（以 fd 为 key）
-  - 使用负载均衡算法（`fd % subReactors.size()`）将新连接分配给子 Reactor
-  - 提供 `newConnection()` 创建新连接，`deleteConnection()` 删除连接
-
-#### 4. 线程池层
-
-- **ThreadPool**: 
-  - 使用模板实现，支持任意可调用对象和参数
-  - 返回 `std::future` 用于获取异步执行结果
-  - 使用条件变量实现任务队列的生产者-消费者模式
-  - 支持优雅关闭（等待所有任务完成）
-
-### 工作流程
-
-1. **初始化阶段**：
-   ```
-   main() 
-   → 创建主 EventLoop（mainReactor）
-   → 创建 Server 
-   → Server 创建 Acceptor（注册到 mainReactor）
-   → Server 创建线程池（大小为 CPU 核心数）
-   → Server 创建多个子 EventLoop（subReactors）
-   → 将子 EventLoop 的 loop() 函数提交到线程池运行
-   ```
-
-2. **主事件循环**（主线程）：
-   ```
-   mainReactor::loop() 
-   → Epoll::poll() 等待事件 
-   → 返回活跃的 Channel 列表 
-   → 依次调用 Channel::handleEvent() 
-   → Acceptor 的 acceptChannel 触发，接受新连接
-   ```
-
-3. **接受新连接**：
-   ```
-   客户端连接到达 
-   → Acceptor 的 acceptChannel 在主线程触发 
-   → 调用 Acceptor::acceptConnection() 
-   → 创建新的 Socket 和 Connection 
-   → 使用负载均衡算法选择子 Reactor（fd % subReactors.size()）
-   → Connection 注册到选中的子 Reactor，监听读事件
-   ```
-
-4. **子事件循环**（线程池中的线程）：
-   ```
-   子 Reactor::loop() 在线程池中运行
-   → Epoll::poll() 等待事件
-   → 返回活跃的 Channel 列表
-   → 依次调用 Channel::handleEvent()
-   ```
-
-5. **处理客户端数据**：
-   ```
-   客户端数据到达 
-   → Connection 的 Channel 在子 Reactor 中触发 
-   → Channel::handleEvent() 检测到 useThreadPool == true
-   → 将 Connection::echo() 回调提交到线程池
-   → 线程池中的线程执行 echo()
-   → 使用非阻塞 I/O 循环读取数据到 Buffer
-   → 读取完成后回显数据
-   → 如果连接关闭，调用删除回调清理资源
-   ```
-
-### 架构特点
-
-#### 主从 Reactor 模式
-
-- **主 Reactor**：单线程，专门处理新连接，避免连接建立成为瓶颈
-- **从 Reactors**：多线程，每个线程运行一个事件循环，处理已建立的连接
-- **负载均衡**：使用简单的取模算法分配连接，后续可优化为更复杂的负载均衡策略
-
-#### 线程池机制
-
-- **两层线程池**：
-  1. 第一层：运行子事件循环（subReactors）
-  2. 第二层：处理具体的业务逻辑（Connection 的回调）
-- **灵活配置**：Channel 可以选择是否使用线程池执行回调
-  - Acceptor 不使用线程池（主线程同步处理，保证连接建立的及时性）
-  - Connection 使用线程池（避免阻塞事件循环）
-
-#### 非阻塞 I/O + 边缘触发
-
-- 所有 socket 设置为非阻塞模式
-- 使用 EPOLLET（边缘触发），内核只通知一次
-- 在回调中必须一次性读取完所有数据，直到 `EAGAIN` 或 `EWOULDBLOCK`
-
-### 设计模式
-
-- **主从 Reactor 模式**：主线程处理连接建立，工作线程处理连接 I/O
-- **线程池模式**：复用线程，减少线程创建和销毁的开销
-- **回调机制**：使用 `std::function` 实现灵活的回调注册
-- **RAII**：通过构造函数和析构函数管理资源（socket、Channel、Buffer 等）
+- **事件驱动架构**：基于 epoll 的 I/O 多路复用，高效处理大量并发连接
+- **主从 Reactor 模式**：主线程处理连接建立，工作线程处理 I/O 事件，职责分离
 - **非阻塞 I/O**：所有 socket 设置为非阻塞模式，配合 epoll 实现高并发
+- **线程安全**：One Loop Per Thread 设计，支持跨线程任务调度
+- **定时器功能**：基于 timerfd 的高精度定时器，支持一次性或周期性任务
+- **零拷贝优化**：Buffer 使用 readv 减少内存拷贝，提高性能
+- **RAII 资源管理**：自动管理资源生命周期，避免内存泄漏
 
-### 已知问题
+## 技术栈
 
-- **多线程安全问题**：`Connection::deleteConnectionCallBack` 在多线程环境下可能存在竞态条件，需要后续优化
-- **连接删除**：当前实现中直接删除 Connection 可能导致段错误，需要实现线程安全的延迟删除机制
+- C++17
+- Linux epoll
+- eventfd / timerfd
+- 线程池
+- CMake 构建系统
 
-## 构建
+## 架构概览
+
+KnetLib 采用分层架构设计：
+
+```
+┌──────────────────────────────────────────
+│         应用层 (TcpServer/TcpClient)   
+├───────────────────────────────────────────
+│         网络层 (TcpConnection)         
+├──────────────────────────────────────────
+│   事件驱动层 (EventLoop/Channel/Epoll)  
+├───────────────────────────────────────────
+│   系统调用封装层 (Socket/Buffer/Utils)   
+└───────────────────────────────────────────
+```
+
+### 核心组件
+
+- **EventLoop**：事件循环核心，不断调用 epoll_wait 等待事件
+- **Channel**：封装文件描述符和事件，管理回调函数
+- **Epoll**：封装 epoll 系统调用，管理文件描述符的注册和事件等待
+- **Buffer**：高效的字节缓冲区，支持零拷贝读取
+- **TcpServer**：实现主从 Reactor 模式的服务器
+- **TcpConnection**：管理单个 TCP 连接的生命周期
+- **TimerQueue**：基于 timerfd 的定时器管理
+
+### 主从 Reactor 模式
+
+- **主 Reactor**：在主线程运行，专门处理新连接建立
+- **从 Reactors**：在工作线程运行，处理已建立连接的 I/O 事件
+- **负载均衡**：使用取模算法将新连接分配到不同的工作线程
+
+## 快速开始
+
+### 构建要求
+
+- Linux 系统
+- C++17 编译器（GCC 7+ 或 Clang 5+）
+- CMake 3.10+
+
+### 编译
 
 ```bash
-# 1. 创建构建目录
-mkdir build
-cd build
+# 创建构建目录
+mkdir build && cd build
 
-# 2. 运行 CMake 配置
+# 运行 CMake 配置
 cmake ..
 
-# 3. 编译项目
-make
+# 编译项目
+make -j
 
-# 4. 运行程序
+# 运行示例程序
 ./bin/server    # 在一个终端运行服务器
 ./bin/client    # 在另一个终端运行客户端
+```
 
-# 5. 清理构建文件
-make clean-all
+### 运行测试
 
-# 6. 运行测试
-make ThreadPoolTest    # 编译线程池测试
-./bin/ThreadPoolTest   # 运行测试
+```bash
+# 编译测试
+make ThreadPoolTest
+make test
 
-make test              # 编译压力测试
-./bin/test             # 运行压力测试（默认 100 线程，每个 100 消息）
+# 运行测试
+./bin/ThreadPoolTest
+./bin/test              # 压力测试（默认 100 线程，每个 100 消息）
 ./bin/test -t 50 -m 200  # 自定义参数：50 线程，每个 200 消息
 ```
+
+## 使用示例
+
+### 服务器示例
+
+```cpp
+#include "TcpServer.h"
+#include "EventLoop.h"
+#include "InetAddress.h"
+#include "Logger.h"
+
+int main() {
+    EventLoop loop;
+    InetAddress listenAddr(8888);
+    TcpServer server(&loop, listenAddr);
+
+    // 设置连接回调
+    server.setConnectionCallback([](const TcpConnectionPtr& conn) {
+        if (conn->connected()) {
+            INFO("New connection: {}", conn->name());
+        } else {
+            INFO("Connection closed: {}", conn->name());
+        }
+    });
+
+    // 设置消息回调
+    server.setMessageCallback([](const TcpConnectionPtr& conn, 
+                                 Buffer* buf, 
+                                 Timestamp time) {
+        std::string msg = buf->retrieveAllAsString();
+        conn->send(msg);  // Echo 回显
+    });
+
+    // 设置工作线程数
+    server.setNumThread(4);
+    
+    // 启动服务器
+    server.start();
+    loop.loop();
+    
+    return 0;
+}
+```
+
+### 客户端示例
+
+```cpp
+#include "TcpClient.h"
+#include "EventLoop.h"
+#include "InetAddress.h"
+#include "Logger.h"
+
+int main() {
+    EventLoop loop;
+    InetAddress serverAddr("127.0.0.1", 8888);
+    TcpClient client(&loop, serverAddr);
+
+    // 设置连接回调
+    client.setConnectionCallback([](const TcpConnectionPtr& conn) {
+        if (conn->connected()) {
+            conn->send("Hello Server");
+        }
+    });
+
+    // 设置消息回调
+    client.setMessageCallback([](const TcpConnectionPtr& conn, 
+                                Buffer* buf, 
+                                Timestamp time) {
+        std::string msg = buf->retrieveAllAsString();
+        INFO("Received: {}", msg);
+    });
+
+    // 连接服务器
+    client.connect();
+    loop.loop();
+    
+    return 0;
+}
+```
+
+## 项目结构
+
+```
+KnetLib/
+├── src/              # 源代码
+│   ├── EventLoop.*   # 事件循环
+│   ├── Channel.*     # 文件描述符封装
+│   ├── Epoll.*       # epoll 封装
+│   ├── TcpServer.*   # 服务器实现
+│   ├── TcpConnection.* # 连接管理
+│   ├── Buffer.*      # 缓冲区
+│   └── ...
+├── test/             # 测试代码
+├── build/            # 构建目录
+└── CMakeLists.txt    # CMake 配置文件
+```
+
+## 设计特点
+
+### One Loop Per Thread
+
+每个 EventLoop 只在一个线程中运行，通过线程 ID 检查确保线程一致性，避免跨线程直接操作，减少锁的使用。
+
+### 跨线程调用
+
+通过任务队列和 wakeup 机制实现跨线程调用。使用 eventfd 创建 wakeupfd，其他线程写入数据唤醒阻塞在 epoll_wait 的线程。
+
+### 生命周期管理
+
+使用 `std::shared_ptr` 管理 TcpConnection 生命周期，通过 Channel 的 tie 机制确保对象在回调执行期间不被析构。
+
+### 非阻塞 I/O
+
+所有 socket 设置为非阻塞模式，配合 epoll 实现高并发。正确处理 EAGAIN 和部分读写情况。
+
+## 性能优化
+
+- **零拷贝读取**：使用 readv 一次读取多个缓冲区
+- **减少系统调用**：批量处理事件和任务
+- **避免锁竞争**：One Loop Per Thread，每个连接绑定固定线程
+- **事件驱动**：只在有事件时处理，减少 CPU 占用
+
+## 参考
+
+本项目参考了以下优秀项目：
+
+- [muduo](https://github.com/chenshuo/muduo) - 一个优秀的 C++ 网络库
+

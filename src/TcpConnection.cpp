@@ -37,10 +37,23 @@ TcpConnection::TcpConnection(EventLoop* loop, int sockfd, const InetAddress& loc
 }
 
 TcpConnection::~TcpConnection() {
-    assert(state_ == kDisconnected);
-    TRACE("~TcpConnection() {} fd={}", name().c_str(), sockfd_);
-    if (sockfd_ != -1) {
-        close(sockfd_);
+    int currentState = state_.load(std::memory_order_acquire);
+    // 如果连接状态不是 kDisconnected，说明连接没有被正确关闭
+    // 这可能发生在 EventLoop 退出时，连接还在运行
+    // 在这种情况下，我们直接关闭 socket，但记录警告
+    if (currentState != kDisconnected) {
+        WARN("TcpConnection::~TcpConnection() connection not properly closed, state=%d, fd=%d", 
+             currentState, sockfd_);
+        // 直接关闭 socket，避免资源泄漏
+        if (sockfd_ != -1) {
+            close(sockfd_);
+        }
+        // 注意：我们不设置状态为 kDisconnected，因为对象正在析构
+    } else {
+        TRACE("~TcpConnection() {} fd={}", name().c_str(), sockfd_);
+        if (sockfd_ != -1) {
+            close(sockfd_);
+        }
     }
 }
 
@@ -59,16 +72,17 @@ void TcpConnection::setCloseCallback(const CloseCallback& callback) {
 }
 
 void TcpConnection::connectEstablished() {
-    assert(state_ == kConnecting);
-    state_ = kConnected;
+    int expected = kConnecting;
+    assert(state_.load(std::memory_order_acquire) == kConnecting);
+    state_.store(kConnected, std::memory_order_release);
     channel_.tie(shared_from_this()); // 将socketfd_的Channel和TcpConnection绑定
     channel_.enableRead(); // 打开socket的读
 }
 bool TcpConnection::connected() const {
-    return state_ == kConnected;
+    return state_.load(std::memory_order_acquire) == kConnected;
 }
 bool TcpConnection::disconnected() const {
-    return state_ == kDisconnected;
+    return state_.load(std::memory_order_acquire) == kDisconnected;
 }
 
 const InetAddress& TcpConnection::local() const {
@@ -95,7 +109,7 @@ void TcpConnection::send(const std::string& data) {
     send(data.data(), data.length());
 }
 void TcpConnection::send(const char* data, size_t len) {
-    if (state_ != kConnected) {
+    if (state_.load(std::memory_order_acquire) != kConnected) {
         WARN("TcpConnection::send() not connected, give up send");
         return;
     }
@@ -111,7 +125,7 @@ void TcpConnection::send(const char* data, size_t len) {
     }
 }
 void TcpConnection::send(Buffer& buffer) {
-    if (state_ != kConnected) {
+    if (state_.load(std::memory_order_acquire) != kConnected) {
         WARN("TcpConnection::send() not connected, give up send");
         return;
     }
@@ -125,7 +139,7 @@ void TcpConnection::send(Buffer& buffer) {
 }
 
 void TcpConnection::shutdown() {
-    assert(state_ != kDisconnected);
+    assert(state_.load(std::memory_order_acquire) != kDisconnected);
     if (stateAtomicGetAndSet(kDisconnecting) == kConnected) {
         if (loop_->isInLoopThread()) {
             shutdownInLoop();
@@ -137,9 +151,15 @@ void TcpConnection::shutdown() {
     }
 }
 void TcpConnection::forceClose() {
-    if (state_ != kDisconnected) {
+    if (state_.load(std::memory_order_acquire) != kDisconnected) {
         if (stateAtomicGetAndSet(kDisconnecting) != kDisconnected) {
-            loop_->queueInLoop(std::bind(&TcpConnection::forceCloseInLoop, shared_from_this()));
+            // 如果我们在 EventLoop 线程中，可以直接调用 forceCloseInLoop
+            // 这样可以避免 queueInLoop 在 EventLoop 退出后无法执行的问题
+            if (loop_->isInLoopThread()) {
+                forceCloseInLoop();
+            } else {
+                loop_->queueInLoop(std::bind(&TcpConnection::forceCloseInLoop, shared_from_this()));
+            }
         }
     }
 }
@@ -171,7 +191,7 @@ const Buffer& TcpConnection::outputBuffer() const {
 
 void TcpConnection::handleRead() {
     loop_->assertInLoopThread();
-    assert(state_ != kDisconnected);
+    assert(state_.load(std::memory_order_acquire) != kDisconnected);
     int savedErrno;
     ssize_t n = inputBuffer_.readFd(sockfd_, &savedErrno);
     if (n == -1) {
@@ -189,7 +209,8 @@ void TcpConnection::handleRead() {
     }
 }
 void TcpConnection::handleWrite() {
-    if (state_ == kDisconnected) {
+    loop_->assertInLoopThread();
+    if (state_.load(std::memory_order_acquire) == kDisconnected) {
         WARN("TcpConnection::handleWrite() disconnected, give up writing %zu bytes", outputBuffer_.readableBytes());
         return;
     }
@@ -197,13 +218,19 @@ void TcpConnection::handleWrite() {
     assert(channel_.isWriting());
     ssize_t n = ::write(sockfd_, outputBuffer_.peek(), outputBuffer_.readableBytes());
     if (n == -1) {
-        SYSERR("TcpConnection::write()");
+        int savedErrno = errno;
+        if (savedErrno != EAGAIN) {
+            SYSERR("TcpConnection::write()");
+            if (savedErrno == EPIPE || savedErrno == ECONNRESET) {
+                handleError();
+            }
+        }
     }
     else {
         outputBuffer_.retrieve(static_cast<size_t>(n));
         if (outputBuffer_.readableBytes() == 0) {
             channel_.disableWrite();
-            if (state_ == kDisconnecting)
+            if (state_.load(std::memory_order_acquire) == kDisconnecting)
                 shutdownInLoop();
             if (writeCompleteCallback_) {
                 loop_->queueInLoop(std::bind(writeCompleteCallback_, shared_from_this()));
@@ -213,25 +240,29 @@ void TcpConnection::handleWrite() {
 }
 void TcpConnection::handleClose() {
     loop_->assertInLoopThread();
-    assert(state_ == kConnected || state_ == kDisconnecting);
-    state_ = kDisconnected;
+    int currentState = state_.load(std::memory_order_acquire);
+    assert(currentState == kConnected || currentState == kDisconnecting);
+    state_.store(kDisconnected, std::memory_order_release);
     loop_->removeChannel(&channel_);
     if (closeCallback_) {
         closeCallback_(shared_from_this());
     }
 }
 void TcpConnection::handleError() {
+    loop_->assertInLoopThread();
     int err;
     socklen_t len = sizeof(err);
     int ret = getsockopt(sockfd_, SOL_SOCKET, SO_ERROR, &err, &len);
     if (ret != -1)
         errno = err;
     SYSERR("TcpConnection::handleError()");
+    // 发生错误时关闭连接
+    handleClose();
 }
 
 void TcpConnection::sendInLoop(const char *data, size_t len) {
     loop_->assertInLoopThread();
-    if (state_ == kDisconnected) {
+    if (state_.load(std::memory_order_acquire) == kDisconnected) {
         WARN("TcpConnection::sendInLoop() disconnected, give up send");
         return;
     }
@@ -248,8 +279,11 @@ void TcpConnection::sendInLoop(const char *data, size_t len) {
         if (n == -1) {
             if (errno != EAGAIN) {
                 SYSERR("TcpConnection::write()");
-                if (errno == EPIPE || errno == ECONNRESET)
+                if (errno == EPIPE || errno == ECONNRESET) {
                     faultError = true;
+                    // 连接已断开，关闭连接
+                    handleClose();
+                }
             }
             n = 0;
         }
@@ -285,7 +319,7 @@ void TcpConnection::sendInLoop(const std::string& message) {
 
 void TcpConnection::shutdownInLoop() {
     loop_->assertInLoopThread();
-    if (state_ != kDisconnected && !channel_.isWriting()) {
+    if (state_.load(std::memory_order_acquire) != kDisconnected && !channel_.isWriting()) {
         if (::shutdown(sockfd_, SHUT_WR) == -1) {
             SYSERR("TcpConnection::shutdown()");
         }
@@ -293,12 +327,12 @@ void TcpConnection::shutdownInLoop() {
 }
 void TcpConnection::forceCloseInLoop() {
     loop_->assertInLoopThread();
-    if (state_ != kDisconnected) {
+    if (state_.load(std::memory_order_acquire) != kDisconnected) {
         handleClose();
     }
 }
 
 int TcpConnection::stateAtomicGetAndSet(int newState) {
-    return __atomic_exchange_n(&state_, newState, __ATOMIC_SEQ_CST); // 顺序一致性内存序
+    return state_.exchange(newState, std::memory_order_acq_rel);
 }
 

@@ -12,12 +12,14 @@ class TcpServerSingle : noncopyable {
 
 public:
     TcpServerSingle(EventLoop* loop, const InetAddress& local);
+    ~TcpServerSingle();
 
     void setConnectionCallback(const ConnectionCallback& callback);
     void setMessageCallback(const MessageCallback &callback);
     void setWriteCompleteCallback(const WriteCompleteCallback &callback);
     
     void start();
+    void stop(); // 停止服务器，关闭所有连接
 
 private:
     using ConnectionSet = std::unordered_set<TcpConnectionPtr>;

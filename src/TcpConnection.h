@@ -1,6 +1,7 @@
 #pragma once
 
 #include <any>
+#include <atomic>
 
 #include "noncopyable.h"
 #include "Callbacks.h"
@@ -63,7 +64,7 @@ private:
     EventLoop* loop_;
     const int sockfd_;
     Channel channel_;
-    int state_;
+    std::atomic<int> state_;
     InetAddress local_;
     InetAddress peer_;
     Buffer inputBuffer_;

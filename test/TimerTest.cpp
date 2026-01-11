@@ -21,7 +21,7 @@ protected:
 // 测试 Timer 构造
 TEST_F(TimerTest, Constructor) {
     TimerCallback cb = [this]() { callbackCalled = true; };
-    Timestamp when = clock::now() + Seconds(1);
+    Timestamp when = time_utils::now() + Seconds(1);
     Timer timer(cb, when, Milliseconds::zero());
     
     EXPECT_FALSE(timer.repeat());
@@ -32,7 +32,7 @@ TEST_F(TimerTest, Constructor) {
 // 测试重复定时器
 TEST_F(TimerTest, RepeatTimer) {
     TimerCallback cb = [this]() { callbackCalled = true; };
-    Timestamp when = clock::now() + Seconds(1);
+    Timestamp when = time_utils::now() + Seconds(1);
     Timer timer(cb, when, Seconds(1));
     
     EXPECT_TRUE(timer.repeat());
@@ -41,20 +41,20 @@ TEST_F(TimerTest, RepeatTimer) {
 // 测试过期检查
 TEST_F(TimerTest, Expired) {
     TimerCallback cb = []() {};
-    Timestamp past = clock::now() - Seconds(1);
-    Timestamp future = clock::now() + Seconds(1);
+    Timestamp past = time_utils::now() - Seconds(1);
+    Timestamp future = time_utils::now() + Seconds(1);
     
     Timer timer1(cb, past, Milliseconds::zero());
     Timer timer2(cb, future, Milliseconds::zero());
     
-    EXPECT_TRUE(timer1.expired(clock::now()));
-    EXPECT_FALSE(timer2.expired(clock::now()));
+    EXPECT_TRUE(timer1.expired(time_utils::now()));
+    EXPECT_FALSE(timer2.expired(time_utils::now()));
 }
 
 // 测试 run
 TEST_F(TimerTest, Run) {
     TimerCallback cb = [this]() { callbackCalled = true; };
-    Timer timer(cb, clock::now(), Milliseconds::zero());
+    Timer timer(cb, time_utils::now(), Milliseconds::zero());
     
     timer.run();
     EXPECT_TRUE(callbackCalled);
@@ -63,7 +63,7 @@ TEST_F(TimerTest, Run) {
 // 测试 restart
 TEST_F(TimerTest, Restart) {
     TimerCallback cb = []() {};
-    Timestamp when = clock::now();
+    Timestamp when = time_utils::now();
     Timer timer(cb, when, Seconds(1));
     
     Timestamp oldWhen = timer.when();
@@ -77,7 +77,7 @@ TEST_F(TimerTest, Restart) {
 // 测试 cancel
 TEST_F(TimerTest, Cancel) {
     TimerCallback cb = []() {};
-    Timer timer(cb, clock::now(), Milliseconds::zero());
+    Timer timer(cb, time_utils::now(), Milliseconds::zero());
     
     EXPECT_FALSE(timer.canceled());
     timer.cancel();

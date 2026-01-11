@@ -12,18 +12,38 @@ protected:
         epoll = new Epoll(loop);
         
         int pipefd[2];
-        pipe(pipefd);
+        int ret = pipe(pipefd);
+        ASSERT_EQ(ret, 0) << "Failed to create pipe";
         readFd = pipefd[0];
         writeFd = pipefd[1];
+        ASSERT_GE(readFd, 0) << "Invalid read fd";
+        ASSERT_GE(writeFd, 0) << "Invalid write fd";
         channel = new Channel(loop, readFd);
+        ASSERT_NE(channel, nullptr) << "Failed to create channel";
+        ASSERT_EQ(channel->fd(), readFd) << "Channel fd mismatch";
     }
 
     void TearDown() override {
-        delete channel;
-        close(readFd);
-        close(writeFd);
-        delete epoll;
-        delete loop;
+        if (channel) {
+            delete channel;
+            channel = nullptr;
+        }
+        if (readFd >= 0) {
+            close(readFd);
+            readFd = -1;
+        }
+        if (writeFd >= 0) {
+            close(writeFd);
+            writeFd = -1;
+        }
+        if (epoll) {
+            delete epoll;
+            epoll = nullptr;
+        }
+        if (loop) {
+            delete loop;
+            loop = nullptr;
+        }
     }
 
     EventLoop* loop;
@@ -40,6 +60,8 @@ TEST_F(EpollTest, Constructor) {
 
 // 测试 updateChannel
 TEST_F(EpollTest, UpdateChannel) {
+    // 确保 fd 有效
+    ASSERT_GE(channel->fd(), 0);
     channel->enableRead();
     epoll->updateChannel(channel);
     
@@ -48,6 +70,8 @@ TEST_F(EpollTest, UpdateChannel) {
 
 // 测试 removeChannel
 TEST_F(EpollTest, RemoveChannel) {
+    // 确保 fd 有效
+    ASSERT_GE(channel->fd(), 0);
     channel->enableRead();
     epoll->updateChannel(channel);
     EXPECT_TRUE(channel->pooling);
@@ -59,6 +83,8 @@ TEST_F(EpollTest, RemoveChannel) {
 
 // 测试 poll
 TEST_F(EpollTest, Poll) {
+    // 确保 fd 有效
+    ASSERT_GE(channel->fd(), 0);
     channel->enableRead();
     epoll->updateChannel(channel);
     

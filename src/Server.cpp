@@ -8,9 +8,10 @@
 #include <thread>
 
 
-Server::Server(EventLoop *_loop) : mainReactor(_loop), acceptor(nullptr){ 
-    acceptor = new Acceptor(mainReactor);
-    std::function<void(Socket*)> cb = std::bind(&Server::newConnection, this, std::placeholders::_1);
+Server::Server(EventLoop *_loop, const InetAddress& local) : mainReactor(_loop), acceptor(nullptr){ 
+    acceptor = new Acceptor(mainReactor, local);
+    std::function<void(int, const InetAddress&, const InetAddress&)> cb = std::bind(&Server::newConnection, this, 
+            std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
     acceptor->setNewConnectionCallback(cb);
 
     int size = std::thread::hardware_concurrency();
@@ -27,23 +28,38 @@ Server::Server(EventLoop *_loop) : mainReactor(_loop), acceptor(nullptr){
 }
 
 Server::~Server(){
-    delete acceptor;
+    // 先停止所有 EventLoop
+    for(auto loop : subReactors){
+        if(loop != nullptr){
+            loop->quit();
+        }
+    }
+    // 等待 ThreadPool 中的任务完成
     delete thpool;
     // 删除 subReactors 中的 EventLoop 对象，避免内存泄漏
     for(auto loop : subReactors){
         delete loop;
     }
+    delete acceptor;
+    // 清理所有连接
+    for(auto& pair : connections){
+        if(pair.second != nullptr){
+            delete pair.second;
+        }
+    }
+    connections.clear();
 }
 
 
-void Server::newConnection(Socket *sock){
-    if(sock->getFd() != -1){
+void Server::newConnection(int sockfd, const InetAddress& local, const InetAddress& peer){
+    if(sockfd != -1){
         //TODO:这里可以设计负载均衡算法
-        int random = sock->getFd() % subReactors.size();
-        Connection *conn = new Connection(subReactors[random],sock);
+        int random = sockfd % subReactors.size();
+        Socket *sock = new Socket(sockfd);
+        Connection *conn = new Connection(subReactors[random], sock);
         std::function<void(int)> cb = std::bind(&Server::deleteConnection, this, std::placeholders::_1);
         conn->setDeleteConnectionCallBack(cb);
-        connections[sock->getFd()] = conn;
+        connections[sockfd] = conn;
     }
 }
 
@@ -51,10 +67,12 @@ void Server::deleteConnection(int sockfd){
     if(sockfd != -1){
         auto it = connections.find(sockfd);
         if(it != connections.end()){
-            Connection *conn = connections[sockfd];
-            connections.erase(sockfd);
-            // close(sockfd);       //正常
-            delete conn;         //会Segmant fault
+            Connection *conn = it->second;
+            connections.erase(it);  // 使用迭代器删除更安全
+            // 注意：Connection 的析构函数会关闭 socket 并清理资源
+            // 如果 Connection 还在 EventLoop 中被使用，删除可能导致段错误
+            // 建议使用 shared_ptr 管理 Connection 的生命周期
+            delete conn;
         }
     }
 }

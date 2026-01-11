@@ -28,7 +28,7 @@ void timerfdRead(int fd) {
 // 返回从当前时间点到指定时间戳之间的时间间隔
 timespec durationFromNow(Timestamp when) {
     timespec ret;
-    Nanoseconds ns = when - clock::now();
+    Nanoseconds ns = when - time_utils::now();
 
     using namespace std::chrono;
     if (ns < 1ms) ns = 1ms;
@@ -103,7 +103,17 @@ void TimerQueue::cancelTimer(Timer* timer) {
     loop_->runInLoop(
         [this, timer]() {
             timer->cancel();
-            timers_.erase({timer->when(), timer});
+            // 查找并删除包含此 timer 的 Entry
+            // 由于 timer 可能已经重启（when() 改变），需要遍历查找
+            for (auto it = timers_.begin(); it != timers_.end(); ++it) {
+                if (it->second == timer) {
+                    timers_.erase(it);
+                    delete timer;
+                    return;
+                }
+            }
+            // 如果没找到，说明定时器可能已经被处理或删除
+            // 但 timer 已经被标记为取消，所以是安全的
             delete timer;
         }
     );
@@ -113,7 +123,7 @@ void TimerQueue::handleRead() {
     loop_->assertInLoopThread();
     timerfdRead(timerfd_); // 将可读的内容读取一下从而清空缓冲区
 
-    Timestamp now(clock::now());
+    Timestamp now(time_utils::now());
     for (auto& e : getExpired(now)) {
         Timer* timer = e.second;
         assert(timer->expired(now)); // now >= when
