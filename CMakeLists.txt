@@ -61,6 +61,15 @@ set_target_properties(server PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
+# 创建客户端可执行文件
+add_executable(client
+    client.cpp
+)
+target_link_libraries(client PRIVATE knetlib_lib)
+set_target_properties(client PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
 # ============================================================================
 # 测试配置
 # ============================================================================

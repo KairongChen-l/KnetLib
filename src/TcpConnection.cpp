@@ -191,7 +191,10 @@ const Buffer& TcpConnection::outputBuffer() const {
 
 void TcpConnection::handleRead() {
     loop_->assertInLoopThread();
-    assert(state_.load(std::memory_order_acquire) != kDisconnected);
+    // 如果连接已经断开，直接返回，避免在关闭过程中处理事件
+    if (state_.load(std::memory_order_acquire) == kDisconnected) {
+        return;
+    }
     int savedErrno;
     ssize_t n = inputBuffer_.readFd(sockfd_, &savedErrno);
     if (n == -1) {
