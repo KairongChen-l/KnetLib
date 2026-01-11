@@ -1,5 +1,5 @@
-#include "InetAddress.h"
-#include "utils.h"
+#include "knetlib/InetAddress.h"
+#include "knetlib/utils.h"
 #include <arpa/inet.h>
 #include <strings.h>
 #include <cstring>

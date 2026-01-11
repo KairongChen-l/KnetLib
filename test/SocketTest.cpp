@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "Socket.h"
-#include "InetAddress.h"
+#include "knetlib/Socket.h"
+#include "knetlib/InetAddress.h"
 #include <unistd.h>
 #include <sys/socket.h>
 

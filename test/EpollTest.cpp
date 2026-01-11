@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "Epoll.h"
-#include "EventLoop.h"
-#include "Channel.h"
+#include "knetlib/Epoll.h"
+#include "knetlib/EventLoop.h"
+#include "knetlib/Channel.h"
 #include <unistd.h>
 #include <sys/epoll.h>
 

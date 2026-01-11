@@ -2,7 +2,7 @@
 
 #include <cerrno>
 #include <sys/uio.h>
-#include "Buffer.h"
+#include "knetlib/Buffer.h"
 
 const char Buffer::kCRLF[] = "\r\n";
 

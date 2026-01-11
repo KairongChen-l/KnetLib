@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "TcpClient.h"
-#include "EventLoop.h"
-#include "InetAddress.h"
+#include "knetlib/TcpClient.h"
+#include "knetlib/EventLoop.h"
+#include "knetlib/InetAddress.h"
 #include <thread>
 #include <chrono>
 #include <atomic>

@@ -1,5 +1,5 @@
-#include "Channel.h"
-#include "EventLoop.h"
+#include "knetlib/Channel.h"
+#include "knetlib/EventLoop.h"
 #include <cassert>
 #include <sys/epoll.h>
 

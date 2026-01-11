@@ -3,10 +3,10 @@
 #include <string.h>
 #include <functional>
 #include "utils.h"
-#include "Buffer.h"
-#include "InetAddress.h"
-#include "Socket.h"
-#include "ThreadPool.h"
+#include "knetlib/Buffer.h"
+#include "knetlib/InetAddress.h"
+#include "knetlib/Socket.h"
+#include "knetlib/ThreadPool.h"
 
 using namespace std;
 

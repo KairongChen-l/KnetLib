@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "EventLoop.h"
-#include "Channel.h"
-#include "Callbacks.h"
+#include "knetlib/EventLoop.h"
+#include "knetlib/Channel.h"
+#include "knetlib/Callbacks.h"
 #include <thread>
 #include <chrono>
 #include <atomic>

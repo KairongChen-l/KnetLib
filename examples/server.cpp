@@ -1,9 +1,9 @@
-#include "src/EventLoop.h"
-#include "src/TcpServer.h"
-#include "src/TcpConnection.h"
-#include "src/InetAddress.h"
-#include "src/Buffer.h"
-#include "src/Logger.h"
+#include "knetlib/EventLoop.h"
+#include "knetlib/TcpServer.h"
+#include "knetlib/TcpConnection.h"
+#include "knetlib/InetAddress.h"
+#include "knetlib/Buffer.h"
+#include "knetlib/Logger.h"
 #include <iostream>
 #include <signal.h>
 #include <csignal>

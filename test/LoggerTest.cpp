@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "Logger.h"
+#include "knetlib/Logger.h"
 #include <fstream>
 #include <sstream>
 #include <cstdio>

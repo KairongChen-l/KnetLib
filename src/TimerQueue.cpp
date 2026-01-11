@@ -3,9 +3,9 @@
 #include <cstring>
 #include <unistd.h>
 
-#include "TimerQueue.h"
-#include "Logger.h"
-#include "EventLoop.h"
+#include "knetlib/TimerQueue.h"
+#include "knetlib/Logger.h"
+#include "knetlib/EventLoop.h"
 
 namespace {
 

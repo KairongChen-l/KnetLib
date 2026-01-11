@@ -4,10 +4,10 @@
 #include <unistd.h>
 #include <cassert>
 
-#include "EventLoop.h"
-#include "Channel.h"
-#include "utils.h"
-#include "Logger.h"
+#include "knetlib/EventLoop.h"
+#include "knetlib/Channel.h"
+#include "knetlib/utils.h"
+#include "knetlib/Logger.h"
 
 namespace {
 

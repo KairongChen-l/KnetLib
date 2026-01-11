@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "Buffer.h"
+#include "knetlib/Buffer.h"
 #include <cstring>
 #include <string>
 

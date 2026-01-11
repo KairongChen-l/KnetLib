@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "Timer.h"
-#include "Timestamp.h"
-#include "Callbacks.h"
+#include "knetlib/Timer.h"
+#include "knetlib/Timestamp.h"
+#include "knetlib/Callbacks.h"
 #include <atomic>
 #include <thread>
 #include <chrono>

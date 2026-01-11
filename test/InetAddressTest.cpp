@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "InetAddress.h"
+#include "knetlib/InetAddress.h"
 #include <arpa/inet.h>
 
 class InetAddressTest : public ::testing::Test {

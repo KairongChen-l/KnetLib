@@ -1,6 +1,6 @@
-#include "Connector.h"
-#include "Logger.h"
-#include "EventLoop.h"
+#include "knetlib/Connector.h"
+#include "knetlib/Logger.h"
+#include "knetlib/EventLoop.h"
 #include <sys/socket.h>
 #include <unistd.h>
 #include <cerrno>

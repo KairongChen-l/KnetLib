@@ -1,7 +1,7 @@
-#include "Connection.h"
-#include "Socket.h"
-#include "Channel.h"
-#include "utils.h"
+#include "knetlib/Connection.h"
+#include "knetlib/Socket.h"
+#include "knetlib/Channel.h"
+#include "knetlib/utils.h"
 #include <asm-generic/errno-base.h>
 #include <cerrno>
 #include <functional>

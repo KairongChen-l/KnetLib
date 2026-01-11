@@ -1,6 +1,6 @@
-#include "Socket.h"
-#include "InetAddress.h"
-#include "utils.h"
+#include "knetlib/Socket.h"
+#include "knetlib/InetAddress.h"
+#include "knetlib/utils.h"
 #include <netinet/in.h>
 #include <strings.h>
 #include <unistd.h>

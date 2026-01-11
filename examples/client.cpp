@@ -1,10 +1,10 @@
 #include <iostream>
-#include "src/TcpClient.h"
-#include "src/TcpConnection.h"
-#include "src/EventLoop.h"
-#include "src/InetAddress.h"
-#include "src/Buffer.h"
-#include "src/Logger.h"
+#include "knetlib/TcpClient.h"
+#include "knetlib/TcpConnection.h"
+#include "knetlib/EventLoop.h"
+#include "knetlib/InetAddress.h"
+#include "knetlib/Buffer.h"
+#include "knetlib/Logger.h"
 #include <string>
 #include <thread>
 #include <atomic>

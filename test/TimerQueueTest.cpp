@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "TimerQueue.h"
-#include "EventLoop.h"
-#include "Timestamp.h"
+#include "knetlib/TimerQueue.h"
+#include "knetlib/EventLoop.h"
+#include "knetlib/Timestamp.h"
 #include <atomic>
 #include <thread>
 #include <chrono>

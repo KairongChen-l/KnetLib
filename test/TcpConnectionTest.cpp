@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "TcpConnection.h"
-#include "EventLoop.h"
-#include "InetAddress.h"
+#include "knetlib/TcpConnection.h"
+#include "knetlib/EventLoop.h"
+#include "knetlib/InetAddress.h"
 #include <sys/socket.h>
 #include <unistd.h>
 #include <atomic>

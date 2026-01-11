@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "Channel.h"
-#include "EventLoop.h"
+#include "knetlib/Channel.h"
+#include "knetlib/EventLoop.h"
 #include <sys/epoll.h>
 #include <unistd.h>
 #include <memory>
