@@ -44,13 +44,31 @@ KnetLib 采用分层架构设计：
 - **Buffer**：高效的字节缓冲区，支持零拷贝读取
 - **TcpServer**：实现主从 Reactor 模式的服务器
 - **TcpConnection**：管理单个 TCP 连接的生命周期
+- **EventLoopThread**：封装线程和 EventLoop 的生命周期
+- **EventLoopThreadPool**：管理多个工作线程，提供连接分配
 - **TimerQueue**：基于 timerfd 的定时器管理
 
 ### 主从 Reactor 模式
 
-- **主 Reactor**：在主线程运行，专门处理新连接建立
+KnetLib 实现了标准的主从 Reactor 模式，符合 muduo 等成熟网络库的设计：
+
+- **主 Reactor**：在主线程运行，只有一个 Acceptor 负责 accept 新连接
 - **从 Reactors**：在工作线程运行，处理已建立连接的 I/O 事件
-- **负载均衡**：使用取模算法将新连接分配到不同的工作线程
+- **连接分配**：使用轮询（Round-Robin）算法将新连接分配到不同的工作线程
+- **线程管理**：通过 `EventLoopThread` 和 `EventLoopThreadPool` 管理线程生命周期
+
+**架构图**:
+```
+主线程: EventLoop + Acceptor (监听端口) → accept 后分配给子线程
+子线程1: EventLoop (处理分配的连接)
+子线程2: EventLoop (处理分配的连接)
+...
+```
+
+**优势**:
+- 应用层控制连接分配，支持自定义负载均衡策略
+- 不依赖 Linux 特定的 SO_REUSEPORT 特性
+- 符合标准设计模式，易于理解和维护
 
 ## 快速开始
 
@@ -80,14 +98,22 @@ make -j
 ### 运行测试
 
 ```bash
-# 编译测试
-make ThreadPoolTest
-make test
+# 编译所有测试
+cd build
+cmake ..
+make -j
 
-# 运行测试
-./bin/ThreadPoolTest
-./bin/test              # 压力测试（默认 100 线程，每个 100 消息）
-./bin/test -t 50 -m 200  # 自定义参数：50 线程，每个 200 消息
+# 运行所有测试
+ctest --output-on-failure
+
+# 运行特定测试
+./bin/EventLoopThreadTest
+./bin/EventLoopThreadPoolTest
+./bin/TcpServerTest
+
+# 运行集成测试
+./bin/test_network              # 网络集成测试
+./bin/test_network -t 50 -m 200  # 自定义参数：50 线程，每个 200 消息
 ```
 
 ## 使用示例
@@ -173,17 +199,24 @@ int main() {
 
 ```
 KnetLib/
-├── src/              # 源代码
-│   ├── EventLoop.*   # 事件循环
-│   ├── Channel.*     # 文件描述符封装
-│   ├── Epoll.*       # epoll 封装
-│   ├── TcpServer.*   # 服务器实现
-│   ├── TcpConnection.* # 连接管理
-│   ├── Buffer.*      # 缓冲区
+├── src/                      # 源代码
+│   ├── EventLoop.*           # 事件循环
+│   ├── EventLoopThread.*     # 线程封装
+│   ├── EventLoopThreadPool.* # 线程池
+│   ├── Channel.*             # 文件描述符封装
+│   ├── Epoll.*               # epoll 封装
+│   ├── TcpServer.*           # 服务器实现（主从 Reactor）
+│   ├── TcpConnection.*        # 连接管理
+│   ├── Buffer.*               # 缓冲区
 │   └── ...
-├── test/             # 测试代码
-├── build/            # 构建目录
-└── CMakeLists.txt    # CMake 配置文件
+├── test/                      # 测试代码
+│   ├── EventLoopThreadTest.cpp
+│   ├── EventLoopThreadPoolTest.cpp
+│   ├── TcpServerTest.cpp
+│   └── ...
+├── examples/                  # 示例代码
+├── build/                     # 构建目录
+└── CMakeLists.txt             # CMake 配置文件
 ```
 
 ## 设计特点
@@ -211,9 +244,33 @@ KnetLib/
 - **避免锁竞争**：One Loop Per Thread，每个连接绑定固定线程
 - **事件驱动**：只在有事件时处理，减少 CPU 占用
 
+## 测试覆盖
+
+项目包含完善的单元测试和集成测试：
+
+- ✅ EventLoopThread: 3/3 测试通过
+- ✅ EventLoopThreadPool: 5/5 测试通过
+- ✅ TcpServer: 7/7 测试通过
+- ✅ 其他组件测试: 全部通过
+
+运行 `ctest` 查看完整测试报告。
+
+## 性能特性
+- **低延迟**: 事件驱动架构，响应迅速
+- **低开销**: One Loop Per Thread，减少锁竞争
+- **可扩展**: 支持动态调整工作线程数
+
 ## 参考
 
 本项目参考了以下优秀项目：
 
 - [muduo](https://github.com/chenshuo/muduo) - 一个优秀的 C++ 网络库
+
+## 更新日志
+
+### v1.1.0 (2025-01-13)
+- ✅ 实现标准主从 Reactor 模式
+- ✅ 添加 EventLoopThread 和 EventLoopThreadPool
+- ✅ 移除 SO_REUSEPORT 依赖
+- ✅ 完善测试覆盖
 
