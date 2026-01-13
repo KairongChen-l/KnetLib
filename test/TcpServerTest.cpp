@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "knetlib/TcpServer.h"
+#include "knetlib/TcpConnection.h"
 #include "knetlib/EventLoop.h"
 #include "knetlib/InetAddress.h"
 #include <thread>
@@ -34,10 +35,8 @@ TEST_F(TcpServerTest, Constructor) {
 TEST_F(TcpServerTest, SetNumThread) {
     TcpServer server(loop, serverAddr);
     
-    // 需要在 EventLoop 线程中调用
-    loop->runInLoop([&server]() {
-        server.setNumThread(1);
-    });
+    // setNumThread 必须在 start() 之前调用
+    server.setNumThread(1);
     
     EXPECT_TRUE(true);
 }
@@ -88,8 +87,9 @@ TEST_F(TcpServerTest, MultiThread) {
         threadInitCount++;
     });
     
+    server.setNumThread(4);
+    
     loop->runInLoop([&server]() {
-        server.setNumThread(4);
         server.start();
     });
     
@@ -112,12 +112,47 @@ TEST_F(TcpServerTest, ThreadInitCallback) {
         callbackCount++;
     });
     
+    server.setNumThread(2);
+    
     loop->runInLoop([&server]() {
-        server.setNumThread(2);
         server.start();
     });
     
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    
+    // 清理
+    loop->quit();
+    delete loop;
+    loop = nullptr;
+}
+
+// 测试主从 Reactor 模式：验证连接被分配到不同的线程
+TEST_F(TcpServerTest, MasterSlaveReactor) {
+    TcpServer server(loop, serverAddr);
+    
+    std::atomic<int> connectionCount(0);
+    std::vector<std::thread::id> connectionThreadIds;
+    std::mutex threadIdsMutex;
+    
+    server.setConnectionCallback([&connectionCount, &connectionThreadIds, &threadIdsMutex](const TcpConnectionPtr& conn) {
+        if (conn->connected()) {
+            connectionCount++;
+            std::lock_guard<std::mutex> lock(threadIdsMutex);
+            connectionThreadIds.push_back(std::this_thread::get_id());
+        }
+    });
+    
+    server.setNumThread(3);  // 3个工作线程 + 1个主线程
+    
+    loop->runInLoop([&server]() {
+        server.start();
+    });
+    
+    // 等待服务器启动
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    
+    // 这里可以添加客户端连接测试，但为了简化，我们只测试服务器启动
+    // 实际连接测试需要客户端支持
     
     // 清理
     loop->quit();

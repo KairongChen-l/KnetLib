@@ -1,12 +1,10 @@
 #pragma once
 
-#include <thread>
-#include <condition_variable>
 #include <atomic>
 #include <memory>
-#include <vector>
 
 #include "TcpServerSingle.h"
+#include "EventLoopThreadPool.h"
 #include "noncopyable.h"
 #include "Callbacks.h"
 #include "InetAddress.h"
@@ -19,7 +17,8 @@ public:
     TcpServer(EventLoop* loop, const InetAddress& local);
     ~TcpServer();
 
-    // n <= 1，则运行在baseLoop thread中；否则，将会启动另外n - 1个EventLoopThread
+    // 设置工作线程数量（不包括主线程）
+    // 必须在 start() 之前调用
     void setNumThread(size_t n);
 
     void start();
@@ -31,25 +30,22 @@ public:
 
 private:
     void startInLoop();
-    void runInThread(size_t index);
-
-    using ThreadPtr = std::unique_ptr<std::thread>;
-    using ThreadPtrList = std::vector<ThreadPtr>;
-    using TcpServerSinglePtr = std::unique_ptr<TcpServerSingle>;
-    using EventLoopList = std::vector<EventLoop*>;
+    // 新连接回调（在主线程中调用）
+    void newConnection(int sockfd, const InetAddress& local, const InetAddress& peer);
+    // 关闭连接回调（在连接所属的线程中调用）
+    void closeConnection(const TcpConnectionPtr& conn);
 
     EventLoop* baseLoop_;
-    TcpServerSinglePtr baseServer_;
-    ThreadPtrList threads_;
-    EventLoopList eventLoops_;
-    size_t numThreads_;
+    std::unique_ptr<TcpServerSingle> acceptor_;  // 只在主线程中，负责 accept
+    std::unique_ptr<EventLoopThreadPool> threadPool_;
     std::atomic_bool started_;
     InetAddress local_;
-    std::mutex mutex_;
-    std::condition_variable cond_;
     ThreadInitCallback threadInitCallback_;
     ConnectionCallback connectionCallback_;
     MessageCallback messageCallback_;
     WriteCompleteCallback writeCompleteCallback_;
+    
+    // 连接管理（每个连接属于一个 EventLoop）
+    // 注意：连接的实际管理在各自的 EventLoop 线程中
 };
 

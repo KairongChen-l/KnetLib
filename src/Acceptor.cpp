@@ -32,10 +32,8 @@ Acceptor::Acceptor(EventLoop* loop, const InetAddress& local)
     if (ret == -1) {
         SYSFATAL("Acceptor setsockopt SO_REUSEADDR");
     }
-    ret = setsockopt(acceptfd_, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on));
-    if (ret == -1) {
-        SYSFATAL("Acceptor setsockopt SO_REUSEPORT");
-    }
+    // 移除 SO_REUSEPORT，因为现在使用标准的主从 Reactor 模式
+    // 只有主线程监听端口，不需要 SO_REUSEPORT
     ret = bind(acceptfd_, local.getSockaddr(), local.getSocklen());
     if (ret == -1) {
         SYSFATAL("Acceptor bind");

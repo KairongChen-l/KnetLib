@@ -1,59 +1,44 @@
 #include "knetlib/TcpServer.h"
 #include "knetlib/EventLoop.h"
+#include "knetlib/EventLoopThreadPool.h"
+#include "knetlib/TcpConnection.h"
 #include "knetlib/Logger.h"
 #include <cassert>
-#include <thread>
-#include <chrono>
 
 TcpServer::TcpServer(EventLoop* loop, const InetAddress& local)
         : baseLoop_(loop),
-          numThreads_(1),
           started_(false),
           local_(local)
 {
     assert(baseLoop_ != nullptr);
     INFO("create TcpServer %s", local.toIpPort().c_str());
+    
+    // 创建线程池（默认只有主线程）
+    threadPool_ = std::make_unique<EventLoopThreadPool>(baseLoop_);
 }
 
 TcpServer::~TcpServer() {
-    // 在退出 EventLoop 之前，先关闭所有连接
-    // 注意：baseServer_ 在主 EventLoop 中，子线程中的 TcpServerSingle 在栈上
-    if (baseServer_ && baseLoop_) {
+    // 停止 acceptor
+    if (acceptor_ && baseLoop_) {
         if (baseLoop_->isInLoopThread()) {
-            baseServer_->stop();
+            acceptor_->stop();
         } else {
             baseLoop_->runInLoop([this]() {
-                if (baseServer_) {
-                    baseServer_->stop();
+                if (acceptor_) {
+                    acceptor_->stop();
                 }
             });
-            // 等待关闭操作完成
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
     
-    // 退出所有 EventLoop
-    for (auto& loop : eventLoops_) {
-        if (loop != nullptr) {
-            loop->quit();
-        }
-    }
-    // 等待子线程退出（子线程中的 TcpServerSingle 会在 EventLoop 退出时析构）
-    for (auto& thread : threads_) {
-        if (thread && thread->joinable()) {
-            thread->join();
-        }
-    }
     TRACE("~TcpServer");
 }
 
 void TcpServer::setNumThread(size_t n) {
-    baseLoop_->assertInLoopThread();
+    assert(!started_);
     if (n > 0) {
-        numThreads_ = n;
-        eventLoops_.resize(n);
-    }
-    else {
+        threadPool_->setThreadNum(static_cast<int>(n));
+    } else {
         ERROR("TcpServer::setNumThread n <= 0");
     }
 }
@@ -78,65 +63,77 @@ void TcpServer::setWriteCompleteCallback(const WriteCompleteCallback& callback) 
 }
 
 void TcpServer::startInLoop() {
-    INFO("TcpServer::start() %s with %zu eventLoop thread(s)", local_.toIpPort().c_str(), numThreads_);
+    assert(baseLoop_->isInLoopThread());
+    assert(!acceptor_);
     
-    baseServer_ = std::make_unique<TcpServerSingle>(baseLoop_, local_);
-    /**
-     * 如果想改主从Reactor结构，从这里入手，如果只有一个Reactor，则baseServer_回调即为外部传进来的回调，否则，baseServer_执行自己的回调（TcpServer中添加回调，
-     * 来实现连接分配算法），由子Reactor执行外部传进来的回调。Connection对象绑定loop的步骤也需要修改位于TcpServerSingle.cpp
-    **/
-    baseServer_->setConnectionCallback(connectionCallback_);
-    baseServer_->setMessageCallback(messageCallback_);
-    baseServer_->setWriteCompleteCallback(writeCompleteCallback_);
+    // 启动线程池
+    threadPool_->start();
+    
+    // 调用线程初始化回调
     if (threadInitCallback_) {
-        threadInitCallback_(0);
-    }
-    baseServer_->start();
-
-    for (size_t i = 1; i < numThreads_; ++i) {
-        auto thread = new std::thread(std::bind(&TcpServer::runInThread, this, i));
-        {
-            std::unique_lock<std::mutex> lock(mutex_);
-            while (eventLoops_[i] == nullptr) {
-                cond_.wait(lock); // 等待创建子EventLoop对象成功再继续
-            }
+        threadInitCallback_(0);  // 主线程
+        // 为每个工作线程调用初始化回调
+        auto loops = threadPool_->getAllLoops();
+        for (size_t i = 1; i < loops.size(); ++i) {
+            loops[i]->runInLoop([this, i]() {
+                if (threadInitCallback_) {
+                    threadInitCallback_(i);
+                }
+            });
         }
-        threads_.emplace_back(thread);
     }
+    
+    // 创建 Acceptor（只在主线程中）
+    acceptor_ = std::make_unique<TcpServerSingle>(baseLoop_, local_);
+    
+    // 设置新连接回调（在主线程中 accept，然后分配给子线程）
+    acceptor_->setNewConnectionCallback([this](int sockfd, const InetAddress& local, const InetAddress& peer) {
+        newConnection(sockfd, local, peer);
+    });
+    
+    // 启动监听
+    acceptor_->start();
+    
+    INFO("TcpServer::start() %s with %zu eventLoop thread(s)", 
+         local_.toIpPort().c_str(), 
+         threadPool_->getAllLoops().size());
 }
 
-void TcpServer::runInThread(size_t index) {
-    EventLoop loop;
-    // 注意：当前实现中，每个子线程都创建了自己的 TcpServerSingle 和 Acceptor
-    // 这意味着每个线程都在监听同一个端口（需要 SO_REUSEPORT 支持）
-    // 这不是标准的主从Reactor模式，标准模式应该是只有主线程监听，然后分配连接给子线程
-    // 当前实现依赖 Linux 的 SO_REUSEPORT 功能，在功能上可以工作，但不是最佳实践
-    TcpServerSingle server(&loop, local_); // 子EventLoop中的单独TcpServerSingle实例
-
-    server.setConnectionCallback(connectionCallback_);
-    server.setMessageCallback(messageCallback_);
-    server.setWriteCompleteCallback(writeCompleteCallback_);
-
-    {
-        std::lock_guard<std::mutex> guard(mutex_);
-        eventLoops_[index] = &loop;
-        cond_.notify_one();
-    }
-
-    if (threadInitCallback_) {
-        threadInitCallback_(index);
-    }
-    server.start();
-    loop.loop();
+// 在主线程中调用，accept 新连接后分配给子线程
+void TcpServer::newConnection(int sockfd, const InetAddress& local, const InetAddress& peer) {
+    assert(baseLoop_->isInLoopThread());
     
-    // 在 EventLoop 退出后，关闭所有连接
-    // 此时我们在 EventLoop 线程中，可以安全地关闭连接
-    server.stop();
+    // 获取下一个 EventLoop（轮询分配）
+    EventLoop* ioLoop = threadPool_->getNextLoop();
     
-    // 子EventLoop是栈上对象，若loop退出，意味着栈空间将回收，将指向子loop的指针置空
-    {
-        std::lock_guard<std::mutex> guard(mutex_);
-        eventLoops_[index] = nullptr;
+    // 在 ioLoop 的线程中创建连接
+    ioLoop->runInLoop([this, sockfd, local, peer, ioLoop]() {
+        // 创建连接
+        auto conn = std::make_shared<TcpConnection>(ioLoop, sockfd, local, peer);
+        
+        // 设置回调
+        conn->setMessageCallback(messageCallback_);
+        conn->setWriteCompleteCallback(writeCompleteCallback_);
+        conn->setCloseCallback([this](const TcpConnectionPtr& conn) {
+            closeConnection(conn);
+        });
+        
+        // 建立连接
+        conn->connectEstablished();
+        
+        // 调用连接回调
+        if (connectionCallback_) {
+            connectionCallback_(conn);
+        }
+    });
+}
+
+// 在连接所属的线程中调用
+void TcpServer::closeConnection(const TcpConnectionPtr& conn) {
+    // 调用连接回调（通知连接关闭）
+    if (connectionCallback_) {
+        connectionCallback_(conn);
     }
+    // 注意：连接的清理由 TcpConnection 自己负责
 }
 

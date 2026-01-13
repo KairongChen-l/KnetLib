@@ -9,6 +9,7 @@ TcpServerSingle::TcpServerSingle(EventLoop* loop, const InetAddress& local)
         : loop_(loop),
           acceptor_(loop, local)
 {
+    // 默认使用内部的新连接处理
     acceptor_.setNewConnectionCallback(std::bind(&TcpServerSingle::newConnection, this, 
             std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 }
@@ -51,6 +52,9 @@ void TcpServerSingle::setMessageCallback(const MessageCallback& callback) {
 }
 void TcpServerSingle::setWriteCompleteCallback(const WriteCompleteCallback& callback) {
     writeCompleteCallback_ = callback;
+}
+void TcpServerSingle::setNewConnectionCallback(const NewConnectionCallback& callback) {
+    acceptor_.setNewConnectionCallback(callback);
 }
 
 void TcpServerSingle::start() {

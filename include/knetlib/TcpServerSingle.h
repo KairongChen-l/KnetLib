@@ -17,6 +17,8 @@ public:
     void setConnectionCallback(const ConnectionCallback& callback);
     void setMessageCallback(const MessageCallback &callback);
     void setWriteCompleteCallback(const WriteCompleteCallback &callback);
+    // 设置新连接回调（用于主从 Reactor 模式）
+    void setNewConnectionCallback(const NewConnectionCallback& callback);
     
     void start();
     void stop(); // 停止服务器，关闭所有连接
