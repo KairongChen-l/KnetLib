@@ -12,10 +12,20 @@
 #include <string.h>
 #include <fstream>
 #include <mutex>
+#include <memory>
+
+class AsyncLogging;
 
 inline std::string logFileName;
 inline std::ofstream ofs;
 inline std::mutex logMutex;
+
+// 异步日志相关（在 Logger.cpp 中定义）
+extern std::unique_ptr<AsyncLogging> asyncLogging;
+extern bool useAsyncLogging;
+
+// 辅助函数：追加到异步日志（在 Logger.cpp 中实现）
+void appendToAsyncLog(const char* logline, int len);
 
 namespace {
 
@@ -68,8 +78,6 @@ inline void logSys(const std::string& file,
             const char* fmt,
             Args... args)
 {
-    std::lock_guard<std::mutex> lock(logMutex);
-    
     std::stringstream ss;
     ss << timestamp();
     ss << " [";
@@ -89,11 +97,17 @@ inline void logSys(const std::string& file,
 
     std::string output = ss.str() + ": " + strerror(errno) + " - " + filename + ":" + std::to_string(line) + "\n";
 
-    if (logFileName.empty() || logFileName == "stdout") {
-        std::cout << output << std::flush;
-    }
-    else {
-        ofs << output << std::flush;
+    // 使用异步日志
+    if (useAsyncLogging && !to_abort) {
+        appendToAsyncLog(output.c_str(), static_cast<int>(output.length()));
+    } else {
+        // 同步日志（FATAL 或未启用异步日志）
+        std::lock_guard<std::mutex> lock(logMutex);
+        if (logFileName.empty() || logFileName == "stdout") {
+            std::cout << output << std::flush;
+        } else {
+            ofs << output << std::flush;
+        }
     }
     
     if (to_abort) {
@@ -113,8 +127,6 @@ inline void logBase(const std::string& file,
         return;
     }
     
-    std::lock_guard<std::mutex> lock(logMutex);
-    
     std::ostringstream ss;
     ss << timestamp();
     ss << " [";
@@ -132,11 +144,17 @@ inline void logBase(const std::string& file,
 
     std::string output = ss.str() + " - " + filename + ":" + std::to_string(line) + "\n";
 
-    if (logFileName.empty() || logFileName == "stdout") {
-        std::cout << output << std::flush;
-    }
-    else {
-        ofs << output << std::flush;
+    // 使用异步日志
+    if (useAsyncLogging && !to_abort) {
+        appendToAsyncLog(output.c_str(), static_cast<int>(output.length()));
+    } else {
+        // 同步日志（FATAL 或未启用异步日志）
+        std::lock_guard<std::mutex> lock(logMutex);
+        if (logFileName.empty() || logFileName == "stdout") {
+            std::cout << output << std::flush;
+        } else {
+            ofs << output << std::flush;
+        }
     }
 
     if (to_abort) {
@@ -176,4 +194,15 @@ inline void setLogFile(const std::string& fileName) {
     }
     logFileName = fileName;
 }
+
+// 启用异步日志
+// basename: 日志文件基础名称（不含扩展名）
+// rollSize: 日志文件滚动大小（字节），默认 500MB
+// flushInterval: 刷新间隔（秒），默认 3 秒
+void setAsyncLogging(const std::string& basename, 
+                    off_t rollSize = 500 * 1024 * 1024,
+                    int flushInterval = 3);
+
+// 禁用异步日志
+void disableAsyncLogging();
 

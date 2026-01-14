@@ -70,6 +70,10 @@ set(SRC_FILES
     src/TimerQueue.cpp
     src/Connector.cpp
     src/TcpClient.cpp
+    src/EventLoopThread.cpp
+    src/EventLoopThreadPool.cpp
+    src/AsyncLogging.cpp
+    src/Logger.cpp
 )
 
 # 创建静态库
@@ -135,6 +139,9 @@ endfunction()
 add_knetlib_test(BufferTest)
 add_knetlib_test(ChannelTest)
 add_knetlib_test(EventLoopTest)
+add_knetlib_test(EventLoopThreadTest)
+add_knetlib_test(EventLoopThreadPoolTest)
+add_knetlib_test(AsyncLoggingTest)
 add_knetlib_test(LoggerTest)
 add_knetlib_test(TimerTest)
 add_knetlib_test(TimerQueueTest)
